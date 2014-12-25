@@ -112,7 +112,7 @@ public:
   PTXMove(const std::string &dst, const std::string &src, int line_num);
   PTXMove(const std::string &dst, int immediate, int line_num);
   PTXMove(const PTXMove &rhs) { assert(false); }
-  PTXMove(void) { }
+  virtual ~PTXMove(void) { }
 public:
   PTXMove& operator=(const PTXMove &rhs) { assert(false); return *this; }
 protected:
@@ -120,6 +120,42 @@ protected:
   std::string src;
   bool immediate;
   int immediate_value;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXRightShift : public PTXInstruction {
+public:
+  PTXRightShift(const std::string &dst, const std::string &src,
+                int shift_value, int line_num);
+  PTXRightShift(const PTXRightShift &rhs) { assert(false); }
+  virtual ~PTXRightShift(void) { }
+public:
+  PTXRightShift& operator=(const PTXRightShift &rhs) 
+    { assert(false); return *this; }
+protected:
+  std::string dst;
+  std::string src; 
+  int shift_value;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXLeftShift : public PTXInstruction {
+public:
+  PTXLeftShift(const std::string &dst, const std::string &src,
+               int shift_value, int line_num);
+  PTXLeftShift(const PTXRightShift &rhs) { assert(false); }
+  virtual ~PTXLeftShift(void) { }
+public:
+  PTXLeftShift& operator=(const PTXLeftShift &rhs) 
+    { assert(false); return *this; }
+protected:
+  std::string dst;
+  std::string src; 
+  int shift_value;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);

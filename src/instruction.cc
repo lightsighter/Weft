@@ -68,6 +68,12 @@ PTXInstruction* PTXInstruction::interpret(const std::string &line, int line_num)
   PTXInstruction *result = NULL;
   if (PTXSharedDecl::interpret(line, line_num, result))
     return result; 
+  if (PTXMove::interpret(line, line_num, result))
+    return result;
+  if (PTXRightShift::interpret(line, line_num, result))
+    return result;
+  if (PTXLeftShift::interpret(line, line_num, result))
+    return result;
   return result;
 }
 
@@ -217,4 +223,57 @@ bool PTXMove::interpret(const std::string &line, int line_num,
   }
   return false;
 }
+
+PTXRightShift::PTXRightShift(const std::string &d, const std::string &s,
+                             int shift, int line_num)
+ : PTXInstruction(PTX_RIGHT_SHIFT, line_num), 
+   dst(d), src(s), shift_value(shift)
+{
+}
+
+/*static*/
+bool PTXRightShift::interpret(const std::string &line, int line_num,
+                              PTXInstruction *&result)
+{
+  if (line.find("shr.") != std::string::npos)
+  {
+    assert(count(line, "%") == 2);
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 4);
+    std::string arg1 = tokens[1].substr(0, tokens[1].size() - 1);
+    std::string arg2 = tokens[2].substr(0, tokens[2].size() - 1);
+    int arg3 = atoi(tokens[3].substr(0, tokens[3].size() - 1).c_str());
+    result = new PTXRightShift(arg1, arg2, arg3, line_num);
+    return true;
+  }
+  return false;
+}
+
+PTXLeftShift::PTXLeftShift(const std::string &d, const std::string &s,
+                             int shift, int line_num)
+ : PTXInstruction(PTX_LEFT_SHIFT, line_num), 
+   dst(d), src(s), shift_value(shift)
+{
+}
+
+/*static*/
+bool PTXLeftShift::interpret(const std::string &line, int line_num,
+                              PTXInstruction *&result)
+{
+  if (line.find("shl.") != std::string::npos)
+  {
+    assert(count(line, "%") == 2);
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 4);
+    std::string arg1 = tokens[1].substr(0, tokens[1].size() - 1);
+    std::string arg2 = tokens[2].substr(0, tokens[2].size() - 1);
+    int arg3 = atoi(tokens[3].substr(0, tokens[3].size() - 1).c_str());
+    result = new PTXLeftShift(arg1, arg2, arg3, line_num);
+    return true;
+  }
+  return false;
+}
+
 
