@@ -34,6 +34,15 @@ enum PTXKind {
   PTX_LAST, // this one must be last
 };
 
+enum CompType {
+  COMP_GT,
+  COMP_GE,
+  COMP_EQ,
+  COMP_NE,
+  COMP_LE,
+  COMP_LT,
+};
+
 class PTXLabel;
 class PTXBranch;
 
@@ -63,7 +72,7 @@ protected:
 
 class PTXLabel: public PTXInstruction {
 public:
-  PTXLabel(const std::string &line, int line_num);
+  PTXLabel(const std::string &label, int line_num);
   PTXLabel(const PTXLabel &rhs) { assert(false); }
   virtual ~PTXLabel(void) { }
 public:
@@ -74,11 +83,17 @@ public:
   virtual PTXLabel* as_label(void) { return this; }
 public:
   void update_labels(std::map<std::string,PTXInstruction*> &labels);
+protected:
+  std::string label;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
 };
 
 class PTXBranch : public PTXInstruction {
 public:
-  PTXBranch(const std::string &line, int line_num);
+  PTXBranch(const std::string &label, int line_num);
+  PTXBranch(int predicate, const std::string &label, int line_num);
   PTXBranch(const PTXBranch &rhs) { assert(false); }
   virtual ~PTXBranch(void) { }
 public:
@@ -89,6 +104,13 @@ public:
   virtual PTXBranch* as_branch(void) { return this; }
 public:
   void set_targets(const std::map<std::string,PTXInstruction*> &labels);
+protected:
+  int predicate;
+  std::string label;
+  PTXInstruction *target;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
 };
 
 class PTXSharedDecl : public PTXInstruction {
@@ -109,17 +131,16 @@ public:
 
 class PTXMove : public PTXInstruction {
 public:
-  PTXMove(const std::string &dst, const std::string &src, int line_num);
-  PTXMove(const std::string &dst, int immediate, int line_num);
+  PTXMove(int dst, int src, bool immediate, int line_num);
+  PTXMove(int dst, const std::string &src, int line_num);
   PTXMove(const PTXMove &rhs) { assert(false); }
   virtual ~PTXMove(void) { }
 public:
   PTXMove& operator=(const PTXMove &rhs) { assert(false); return *this; }
 protected:
-  std::string dst;
-  std::string src;
+  int args[2];
+  std::string source;
   bool immediate;
-  int immediate_value;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);
@@ -127,17 +148,15 @@ public:
 
 class PTXRightShift : public PTXInstruction {
 public:
-  PTXRightShift(const std::string &dst, const std::string &src,
-                int shift_value, int line_num);
+  PTXRightShift(int zero, int one, int two, bool immediate, int line_num);
   PTXRightShift(const PTXRightShift &rhs) { assert(false); }
   virtual ~PTXRightShift(void) { }
 public:
   PTXRightShift& operator=(const PTXRightShift &rhs) 
     { assert(false); return *this; }
 protected:
-  std::string dst;
-  std::string src; 
-  int shift_value;
+  int args[3];
+  bool immediate;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);
@@ -145,17 +164,199 @@ public:
 
 class PTXLeftShift : public PTXInstruction {
 public:
-  PTXLeftShift(const std::string &dst, const std::string &src,
-               int shift_value, int line_num);
-  PTXLeftShift(const PTXRightShift &rhs) { assert(false); }
+  PTXLeftShift(int zero, int one, int two, bool immediate, int line_num);
+  PTXLeftShift(const PTXLeftShift &rhs) { assert(false); }
   virtual ~PTXLeftShift(void) { }
 public:
   PTXLeftShift& operator=(const PTXLeftShift &rhs) 
     { assert(false); return *this; }
 protected:
-  std::string dst;
-  std::string src; 
-  int shift_value;
+  int args[3];
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXAnd : public PTXInstruction {
+public:
+  PTXAnd(int zero, int one, int two, bool immediate, int line_num);
+  PTXAnd(const PTXAnd &rhs) { assert(false); }
+  virtual ~PTXAnd(void) { }
+public:
+  PTXAnd& operator=(const PTXAnd &rhs) { assert(false); return *this; }
+protected:
+  int args[3];
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXOr : public PTXInstruction {
+public:
+  PTXOr(int zero, int one, int two, bool immediate, int line_num);
+  PTXOr(const PTXOr &rhs) { assert(false); }
+  virtual ~PTXOr(void) { }
+public:
+  PTXOr& operator=(const PTXOr &rhs) { assert(false); return *this; }
+protected:
+  int args[3];
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXAdd : public PTXInstruction {
+public:
+  PTXAdd(int zero, int one, int two, bool immediate, int line_num);
+  PTXAdd(const PTXAdd &rhs) { assert(false); }
+  virtual ~PTXAdd(void) { }
+public:
+  PTXAdd& operator=(const PTXAdd &rhs) { assert(false); return *this; }
+protected:
+  int args[3];
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXSub : public PTXInstruction {
+public:
+  PTXSub(int zero, int one, int two, bool immediate, int line_num);
+  PTXSub(const PTXSub &rhs) { assert(false); }
+  virtual ~PTXSub(void) { }
+public:
+  PTXSub& operator=(const PTXSub &rhs) { assert(false); return *this; }
+protected:
+  int args[3];
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXNeg : public PTXInstruction {
+public:
+  PTXNeg(int zero, int one, bool immediate, int line_num);
+  PTXNeg(const PTXNeg &rhs) { assert(false); }
+  virtual ~PTXNeg(void) { }
+public:
+  PTXNeg& operator=(const PTXNeg &rhs) { assert(false); return *this; }
+protected:
+  int args[2];
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXMul : public PTXInstruction {
+public:
+  PTXMul(int zero, int one, int two, bool immediate, int line_num);
+  PTXMul(const PTXMul &rhs) { assert(false); }
+  virtual ~PTXMul(void) { }
+public:
+  PTXMul& operator=(const PTXMul &rhs) { assert(false); return *this; }
+protected:
+  int args[3];
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXMad : public PTXInstruction {
+public:
+  PTXMad(int args[4], bool immediates[4], int line_num);
+  PTXMad(const PTXMad &rhs) { assert(false); }
+  virtual ~PTXMad(void) { }
+public:
+  PTXMad& operator=(const PTXMad &rhs) { assert(false); return *this; }
+protected:
+  int args[4];
+  bool immediate[4];
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXSetPred : public PTXInstruction {
+public:
+  PTXSetPred(int zero, int one, int two, bool immediate, 
+             CompType comparison, int line_num);
+  PTXSetPred(const PTXSetPred &rhs) { assert(false); }
+  virtual ~PTXSetPred(void) { }
+public:
+  PTXSetPred& operator=(const PTXSetPred &rhs) { assert(false); return *this; }
+protected:
+  int args[3];
+  CompType comparison;
+  bool immediate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXSelectPred : public PTXInstruction {
+public:
+  PTXSelectPred(int zero, int one, int two, int three,
+                bool two_imm, bool three_imm, int line_num);
+  PTXSelectPred(const PTXSelectPred &rhs) { assert(false); }
+  virtual ~PTXSelectPred(void) { }
+public:
+  PTXSelectPred& operator=(const PTXSelectPred &rhs) { assert(false); return *this; }
+protected:
+  int predicate;
+  int args[3];
+  bool immediate[2];
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXBarrier : public PTXInstruction {
+public:
+  PTXBarrier(int name, int count, bool sync, int line_num);
+  PTXBarrier(const PTXBarrier &rhs) { assert(false); }
+  virtual ~PTXBarrier(void) { }
+public:
+  PTXBarrier& operator=(const PTXBarrier &rhs) { assert(false); return *this; }
+protected:
+  int name, count;
+  bool sync;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXSharedAccess : public PTXInstruction {
+public:
+  PTXSharedAccess(int addr, int offset, bool write, int line_num);
+  PTXSharedAccess(const PTXSharedAccess &rhs) { assert(false); }
+  virtual ~PTXSharedAccess(void) { }
+public:
+  PTXSharedAccess& operator=(const PTXSharedAccess &rhs) 
+    { assert(false); return *this; }
+protected:
+  int addr, offset;
+  bool write;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXConvert : public PTXInstruction {
+public:
+  PTXConvert(int zero, int one, int line_num);
+  PTXConvert(const PTXConvert &rhs) { assert(false); }
+  virtual ~PTXConvert(void) { }
+public:
+  PTXConvert& operator=(const PTXConvert &rhs) { assert(false); return *this; }
+protected:
+  int src, dst;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);

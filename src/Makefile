@@ -5,8 +5,8 @@ OUTFILE := weft
 all: $(OUTFILE)
 
 GCC = g++
-CC_FLAGS = -O2
-LD_FLAGS =
+CC_FLAGS = -ggdb -Wall
+LD_FLAGS = -ggdb
 
 FILES = weft.cc \
 	program.cc \
