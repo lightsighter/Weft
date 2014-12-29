@@ -84,7 +84,7 @@ int Program::parse_ptx_file(const char *file_name, int max_num_threads)
     exit(WEFT_ERROR_FILE_OPEN);
   }
   // Once we have the lines, then convert them into static PTX instructions
-  convert_to_instructions(lines);
+  convert_to_instructions(max_num_threads, lines);
 
   return max_num_threads;
 }
@@ -110,7 +110,7 @@ void Program::report_statistics(void)
   fprintf(stdout,"\n");
 }
 
-void Program::convert_to_instructions(
+void Program::convert_to_instructions(int max_num_threads,
                 const std::vector<std::pair<std::string,int> > &lines)
 {
   // Make a first pass and create all the instructions
@@ -142,6 +142,11 @@ void Program::convert_to_instructions(
     {
       PTXBranch *branch = (*it)->as_branch();
       branch->set_targets(labels);
+    }
+    if ((*it)->is_barrier())
+    {
+      PTXBarrier *barrier = (*it)->as_barrier();
+      barrier->update_count(max_num_threads);
     }
   }
 }

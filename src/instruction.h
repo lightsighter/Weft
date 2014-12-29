@@ -45,6 +45,7 @@ enum CompType {
 
 class PTXLabel;
 class PTXBranch;
+class PTXBarrier;
 
 class PTXInstruction {
 public:
@@ -54,9 +55,11 @@ public:
 public:
   virtual bool is_label(void) const { return false; }
   virtual bool is_branch(void) const { return false; } 
+  virtual bool is_barrier(void) const { return false; }
 public:
   virtual PTXLabel* as_label(void) { return NULL; }
   virtual PTXBranch* as_branch(void) { return NULL; }
+  virtual PTXBarrier* as_barrier(void) { return NULL; }
 public:
   inline PTXKind get_kind(void) const { return kind; }
 public:
@@ -93,7 +96,7 @@ public:
 class PTXBranch : public PTXInstruction {
 public:
   PTXBranch(const std::string &label, int line_num);
-  PTXBranch(int predicate, const std::string &label, int line_num);
+  PTXBranch(int predicate, bool negate, const std::string &label, int line_num);
   PTXBranch(const PTXBranch &rhs) { assert(false); }
   virtual ~PTXBranch(void) { }
 public:
@@ -106,6 +109,7 @@ public:
   void set_targets(const std::map<std::string,PTXInstruction*> &labels);
 protected:
   int predicate;
+  bool negate;
   std::string label;
   PTXInstruction *target;
 public:
@@ -324,6 +328,10 @@ public:
   virtual ~PTXBarrier(void) { }
 public:
   PTXBarrier& operator=(const PTXBarrier &rhs) { assert(false); return *this; }
+public:
+  virtual bool is_barrier(void) const { return true; }
+  virtual PTXBarrier* as_barrier(void) { return this; }
+  void update_count(unsigned arrival_count);
 protected:
   int name, count;
   bool sync;

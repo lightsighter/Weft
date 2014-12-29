@@ -62,7 +62,7 @@ void Weft::parse_inputs(int argc, char **argv)
     report_usage(WEFT_ERROR_NO_FILE_NAME, "No file name specified");
   if (verbose)
   {
-    fprintf(stdout,"WEFT SETTINGS:\n");
+    fprintf(stdout,"INITIAL WEFT SETTINGS:\n");
     fprintf(stdout,"  File Name: %s\n", file_name);
     fprintf(stdout,"  Max Number of Threads: %d\n", max_num_threads);
     fprintf(stdout,"  Thread Pool Size: %d\n", thread_pool_size);

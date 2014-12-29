@@ -41,17 +41,22 @@ inline void split(std::vector<std::string> &results,
 
 inline int convert_predicate(const std::string &pred)
 {
-  if (pred.size() > 4)
-    printf("PRED: %s\n", pred.c_str());
-  assert(pred.size() <= 4);
   int result = 0;
   const char *ptr = pred.c_str();
   for (int i = 0; i < pred.size(); i++)
   {
     int temp = (int)ptr[i];
+    assert(((48 <= temp) && (temp <= 57)) ||
+           ((97 <= temp) && (temp <= 122)));
+    if (temp >= 97)
+      temp -= 87;
+    else
+      temp -= 48;
+    assert((0 <= temp) && (temp < 36));
+    int scale = 1;
     for (int j = 0; j < i; j++)
-      temp <<= 7;
-    result += temp;
+      scale *= 36;
+    result += (temp * scale);
   }
   return result;
 }
@@ -205,8 +210,9 @@ PTXBranch::PTXBranch(const std::string &l, int line_num)
 {
 }
 
-PTXBranch::PTXBranch(int p, const std::string &l, int line_num)
-  : PTXInstruction(PTX_BRANCH, line_num), predicate(p), label(l), target(NULL)
+PTXBranch::PTXBranch(int p, bool n, const std::string &l, int line_num)
+  : PTXInstruction(PTX_BRANCH, line_num), 
+    predicate(p), negate(n), label(l), target(NULL)
 {
 }
 
@@ -229,10 +235,12 @@ bool PTXBranch::interpret(const std::string &line, int line_num,
     split(tokens, line.c_str());
     if (tokens.size() == 3)
     {
-      std::string arg1 = tokens[0].substr(1, tokens[0].size() - 2);
+      bool negate = (tokens[0].find("!") != std::string::npos);
+      std::string arg1 = tokens[0].substr((negate ? 3 : 2), 
+                         tokens[0].size() - (negate ? 4 : 3));
       int predicate = convert_predicate(arg1);
       std::string arg2 = tokens[2].substr(0, tokens[2].size() - 1);
-      result = new PTXBranch(predicate, arg2, line_num);
+      result = new PTXBranch(predicate, negate, arg2, line_num);
     }
     else if (tokens.size() == 2)
     {
@@ -297,9 +305,8 @@ bool PTXMove::interpret(const std::string &line, int line_num,
       int start_arg1 = line.find("%");
       int end_arg1 = line.find(",");
       int start_arg2 = line.find("%", end_arg1);
-      int end_arg2 = line.find(";");
-      int arg1 = atoi(line.substr(start_arg1+1, end_arg1 - start_arg1).c_str());
-      int arg2 = atoi(line.substr(start_arg2+1, end_arg2 - start_arg2).c_str());
+      int arg1 = strtol(line.substr(start_arg1+1).c_str(), NULL, 10);
+      int arg2 = strtol(line.substr(start_arg2+1).c_str(), NULL, 10);
       result = new PTXMove(arg1, arg2, false/*immediate*/, line_num);
       return true;
     }
@@ -309,7 +316,7 @@ bool PTXMove::interpret(const std::string &line, int line_num,
       int end_arg1 = line.find(",");
       int start_arg2 = line.find("_", end_arg1);
       int end_arg2 = line.find(";");
-      int arg1 = atoi(line.substr(start_arg1+1, end_arg1 - start_arg1).c_str());
+      int arg1 = strtol(line.substr(start_arg1+1).c_str(), NULL, 10);
       std::string arg2 = line.substr(start_arg2, end_arg2 - start_arg2);
       result = new PTXMove(arg1, arg2, line_num);
       return true;
@@ -319,8 +326,8 @@ bool PTXMove::interpret(const std::string &line, int line_num,
       std::vector<std::string> tokens;
       split(tokens, line.c_str()); 
       assert(tokens.size() == 3);
-      int arg1 = atoi(tokens[2].substr(1, tokens[1].size()-2).c_str());
-      int arg2 = atoi(tokens[2].substr(0, tokens[2].size()-1).c_str());
+      int arg1 = strtol(tokens[1].substr(1).c_str(), NULL, 10);
+      int arg2 = strtol(tokens[2].c_str(), NULL, 10);
       result = new PTXMove(arg1, arg2, true/*immediate*/, line_num);
       return true;
     }
@@ -346,13 +353,12 @@ bool PTXRightShift::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 4);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 2) || (regs == 3));
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1),
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXRightShift(arg1, arg2, arg3, immediate, line_num);
     return true;
   }
@@ -377,13 +383,12 @@ bool PTXLeftShift::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 4);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 2) || (regs == 3));
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1), 
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXLeftShift(arg1, arg2, arg3, immediate, line_num);
     return true;
   }
@@ -407,13 +412,12 @@ bool PTXAnd::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 4);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 2) || (regs == 3));
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1),
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXAnd(arg1, arg2, arg3, immediate, line_num);
     return true;
   }
@@ -437,13 +441,12 @@ bool PTXOr::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 4);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 2) || (regs == 3));
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1),
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXOr(arg1, arg2, arg3, immediate, line_num);
     return true;
   }
@@ -467,13 +470,12 @@ bool PTXAdd::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 4);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 2) || (regs == 3));
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1),
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXAdd(arg1, arg2, arg3, immediate, line_num);
     return true;
   }
@@ -497,13 +499,12 @@ bool PTXSub::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 4);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 2) || (regs == 3));
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1),
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXSub(arg1, arg2, arg3, immediate, line_num);
     return true;
   }
@@ -526,12 +527,11 @@ bool PTXNeg::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 3);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 1) || (regs == 2));
     const bool immediate = (regs == 1);
-    int arg2 = atoi(tokens[2].substr((immediate ? 0 : 1),
-                    tokens[2].size() - (immediate ? 1 : 2)).c_str());
+    int arg2 = strtol(tokens[2].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXNeg(arg1, arg2, immediate, line_num);
     return true;
   }
@@ -555,13 +555,12 @@ bool PTXMul::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 4);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const size_t regs = count(line, "%");
     assert((regs == 2) || (regs == 3));
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1),
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     result = new PTXMul(arg1, arg2, arg3, immediate, line_num);
     return true;
   }
@@ -595,8 +594,7 @@ bool PTXMad::interpret(const std::string &line, int line_num,
       {
         const bool imm = (tokens[i+1].find("%") != std::string::npos);
         immediate[i] = imm;
-        args[i] = atoi(tokens[i+1].substr((imm ? 0 : 1),
-                       tokens[i+1].size() - 1).c_str());
+        args[i] = strtol(tokens[i+1].c_str() + (imm ? 0 : 1), NULL, 10);
       }
       result = new PTXMad(args, immediate, line_num);
     }
@@ -629,22 +627,21 @@ bool PTXSetPred::interpret(const std::string &line, int line_num,
     assert(tokens.size() == 4);
     std::string predicate = tokens[1].substr(1, tokens[1].size() - 2);
     int arg1 = convert_predicate(predicate);
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     const bool immediate = (regs == 2);
-    int arg3 = atoi(tokens[3].substr((immediate ? 0 : 1),
-                    tokens[3].size() - (immediate ? 1 : 2)).c_str());
+    int arg3 = strtol(tokens[3].c_str() + (immediate ? 0 : 1), NULL, 10);
     CompType comparison;
-    if (line.find(".gt.") != std::string::npos)
+    if (line.find(".gt") != std::string::npos)
       comparison = COMP_GT;
-    else if (line.find(".ge.") != std::string::npos)
+    else if (line.find(".ge") != std::string::npos)
       comparison = COMP_GE;
-    else if (line.find(".eq.") != std::string::npos)
+    else if (line.find(".eq") != std::string::npos)
       comparison = COMP_EQ;
-    else if (line.find(".ne.") != std::string::npos)
+    else if (line.find(".ne") != std::string::npos)
       comparison = COMP_NE;
-    else if (line.find(".le.") != std::string::npos)
+    else if (line.find(".le") != std::string::npos)
       comparison = COMP_LE;
-    else if (line.find(".lt.") != std::string::npos)
+    else if (line.find(".lt") != std::string::npos)
       comparison = COMP_LT;
     else
       assert(false);
@@ -676,14 +673,12 @@ bool PTXSelectPred::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens; 
     split(tokens, line.c_str());
     assert(tokens.size() == 5);
-    int arg1 = atoi(tokens[1].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
     bool two_imm = (tokens[2].find("%") == std::string::npos);
-    int arg2 = atoi(tokens[2].substr((two_imm ? 0 : 1),
-                    tokens[2].size() - (two_imm ? 1 : 2)).c_str());
+    int arg2 = strtol(tokens[2].c_str() + (two_imm ? 0 : 1), NULL, 10);
     bool three_imm = (tokens[3].find("%") == std::string::npos);
-    int arg3= atoi(tokens[3].substr((three_imm ? 0 : 1),
-                    tokens[3].size() - (three_imm ? 1 : 2)).c_str());
-    std::string predicate = tokens[4].substr(1, tokens[1].size() - 2);
+    int arg3 = strtol(tokens[3].c_str() + (three_imm ? 0 : 1), NULL, 10);
+    std::string predicate = tokens[4].substr(1, tokens[4].size() - 2);
     int arg4 = convert_predicate(predicate);
     result = new PTXSelectPred(arg1, arg2, arg3, arg4,
                                two_imm, three_imm, line_num);
@@ -697,6 +692,13 @@ PTXBarrier::PTXBarrier(int n, int c, bool s, int line_num)
 {
 }
 
+void PTXBarrier::update_count(unsigned arrival_count)
+{
+  // If we didn't have a count before, set it to the full CTA width
+  if (count < 0)
+    count = arrival_count;
+}
+
 /*static*/
 bool PTXBarrier::interpret(const std::string &line, int line_num,
                            PTXInstruction *&result)
@@ -706,9 +708,11 @@ bool PTXBarrier::interpret(const std::string &line, int line_num,
   {
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
-    assert(tokens.size() == 3);
-    int name = atoi(tokens[1].substr(0, tokens[1].size() - 1).c_str());
-    int count = atoi(tokens[2].substr(0, tokens[2].size() - 1).c_str());
+    assert((tokens.size() == 2) || (tokens.size() == 3));
+    int name = strtol(tokens[1].c_str(), NULL, 10);
+    int count = -1;
+    if (tokens.size() == 3)
+      count = strtol(tokens[2].c_str(), NULL, 10);
     bool sync = (line.find("arrive") == std::string::npos);
     result = new PTXBarrier(name, count, sync, line_num);
     return true;
@@ -729,21 +733,12 @@ bool PTXSharedAccess::interpret(const std::string &line, int line_num,
   if ((line.find(".shared.") != std::string::npos) &&
       (line.find(".align.") == std::string::npos))
   {
-    int addr, offset = 0;   
+    int offset = 0;   
     int start_reg = line.find("[") + 1;
     int end_reg = line.find("+");
-    int end_ins = line.find("]");
-    if (end_reg == (int) std::string::npos)
-    {
-      // No offset
-      addr = atoi(line.substr(start_reg+1, end_ins - start_reg - 1).c_str());
-    }
-    else
-    {
-      // Offset
-      addr = atoi(line.substr(start_reg+1, end_reg - start_reg - 1).c_str());
-      offset = atoi(line.substr(end_reg+1, end_ins - end_reg - 1).c_str());
-    }
+    int addr = strtol(line.c_str()+start_reg+1, NULL, 10);
+    if (end_reg != (int) std::string::npos)
+      offset = strtol(line.c_str()+end_reg+1, NULL, 10);
     bool write = (line.find("st.") != std::string::npos);
     result = new PTXSharedAccess(addr, offset, write, line_num);
     return true;
@@ -765,8 +760,8 @@ bool PTXConvert::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens; 
     split(tokens, line.c_str());
     assert(tokens.size() == 3);
-    int arg1 = atoi(tokens[1].substr(1, tokens[1].size() - 2).c_str());
-    int arg2 = atoi(tokens[2].substr(1, tokens[2].size() - 2).c_str());
+    int arg1 = strtol(tokens[1].c_str()+1, NULL, 10);
+    int arg2 = strtol(tokens[2].c_str()+1, NULL, 10);
     result = new PTXConvert(arg1, arg2, line_num);
     return true;
   }

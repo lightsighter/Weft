@@ -15,7 +15,7 @@ public:
   int parse_ptx_file(const char *file_name, int max_num_threads);
   void report_statistics(void);
 protected:
-  void convert_to_instructions(
+  void convert_to_instructions(int max_num_threads,
           const std::vector<std::pair<std::string,int> > &lines);
 protected:
   std::vector<PTXInstruction*> ptx_instructions;
