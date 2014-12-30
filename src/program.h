@@ -23,7 +23,16 @@ protected:
 
 class Thread {
 public:
-  Thread(void);
+  Thread(unsigned thread_id, Program *p);
+  Thread(const Thread &rhs) : thread_id(0), program(NULL) { assert(false); }
+  ~Thread(void);
+public:
+  Thread& operator=(const Thread &rhs) { assert(false); return *this; }
+public:
+  void emulate(void);
+public:
+  const unsigned thread_id;
+  Program *const program;
 };
 
 #endif //__PROGRAM_H__

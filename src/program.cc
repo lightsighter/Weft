@@ -151,6 +151,16 @@ void Program::convert_to_instructions(int max_num_threads,
   }
 }
 
-Thread::Thread(void)
+Thread::Thread(unsigned tid, Program *p)
+  : thread_id(tid), program(p)
 {
 }
+
+Thread::~Thread(void)
+{
+}
+
+void Thread::emulate(void)
+{
+}
+

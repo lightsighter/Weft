@@ -6,7 +6,7 @@ all: $(OUTFILE)
 
 GCC = g++
 CC_FLAGS = -ggdb -Wall
-LD_FLAGS = -ggdb
+LD_FLAGS = -ggdb -lpthread
 
 FILES = weft.cc \
 	program.cc \
