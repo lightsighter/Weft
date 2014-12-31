@@ -57,6 +57,9 @@ protected:
   void report_usage(int error, const char *error_str);
   void parse_ptx(void);
   void emulate_threads(void); 
+  void construct_dependence_graph(void);
+  void compute_happens_relationships(void);
+  void check_for_race_conditions(void);
 protected:
   void start_threadpool(void);
   void stop_threadpool(void);
@@ -68,11 +71,18 @@ public:
   void complete_task(WeftTask *task);
 public:
   static void* worker_loop(void *arg);
+  static unsigned long long get_current_time_in_micros(void);
+  static size_t get_memory_usage(void);
+protected:
+  void start_instrumentation(int stage);
+  void stop_instrumentation(int stage);
+  void report_instrumentation(void);
 protected:
   const char *file_name;
   int max_num_threads;
   int thread_pool_size;
   bool verbose;
+  bool instrument;
 protected:
   Program *program;
   std::vector<Thread*> threads;
@@ -86,6 +96,10 @@ protected:
   pthread_mutex_t queue_lock;
   pthread_cond_t queue_cond;
   std::deque<WeftTask*> queue;
+protected:
+  // Instrumentation
+  unsigned long long timing[5];
+  size_t memory_usage[5];
 };
 
 #endif // __WEFT_H__

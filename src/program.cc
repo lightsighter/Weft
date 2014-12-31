@@ -110,6 +110,13 @@ void Program::report_statistics(void)
   fprintf(stdout,"\n");
 }
 
+void Program::emulate(Thread *thread)
+{
+  PTXInstruction *pc = ptx_instructions.front();
+  while (pc != NULL)
+    pc = pc->emulate(thread);
+}
+
 void Program::convert_to_instructions(int max_num_threads,
                 const std::vector<std::pair<std::string,int> > &lines)
 {
@@ -162,5 +169,76 @@ Thread::~Thread(void)
 
 void Thread::emulate(void)
 {
+  // Before starting emulation fill in the special
+  // values for particular registers
+  register_store[WEFT_TID_REG] = thread_id;
+  // Use 0 as the default CTA ID
+  register_store[WEFT_CTA_REG] = 0; 
+  program->emulate(this);
+  // Once we are done we can clean up all our data structures
+  shared_locations.clear();
+  register_store.clear();
+  predicate_store.clear();
+}
+
+void Thread::register_shared_location(const std::string &name, int64_t addr)
+{
+  assert(shared_locations.find(name) == shared_locations.end());
+  shared_locations[name] = addr;
+}
+
+bool Thread::find_shared_location(const std::string &name, int64_t &addr)
+{
+  std::map<std::string,int64_t>::const_iterator finder = 
+    shared_locations.find(name);
+  if (finder == shared_locations.end()) {
+    fprintf(stderr,"WEFT WARNING: Unable to find shared "
+                   "memory location %s\n", name.c_str());
+    return false;
+  }
+  addr = finder->second;
+  return true;
+}
+
+void Thread::set_value(int64_t reg, int64_t value)
+{
+  register_store[reg] = value;
+}
+
+bool Thread::get_value(int64_t reg, int64_t &value)
+{
+  std::map<int64_t,int64_t>::const_iterator finder = 
+    register_store.find(reg);
+  if (finder == register_store.end()) {
+#if 0
+    char buffer[11];
+    PTXInstruction::decompress_identifier(reg, buffer, 11);
+    fprintf(stderr,"WEFT WARNING: Unable to find register %s\n", buffer);
+#endif
+    return false;
+  }
+  value = finder->second;
+  return true;
+}
+
+void Thread::set_pred(int64_t pred, bool value)
+{
+  predicate_store[pred] = value;
+}
+
+bool Thread::get_pred(int64_t pred, bool &value)
+{
+  std::map<int64_t,bool>::const_iterator finder = 
+    predicate_store.find(pred);
+  if (finder == predicate_store.end()) {
+#if 0
+    char buffer[11];
+    PTXInstruction::decompress_identifier(pred, buffer, 11);
+    fprintf(stderr,"WEFT WARNING: Unable to find predicate %s\n", buffer);
+#endif
+    return false;
+  }
+  value = finder->second;
+  return true;
 }
 
