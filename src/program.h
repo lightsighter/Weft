@@ -4,6 +4,7 @@
 
 class Thread;
 class PTXInstruction;
+class WeftInstruction;
 
 #include <map>
 #include <vector>
@@ -47,12 +48,16 @@ public:
   void set_pred(int64_t pred, bool value);
   bool get_pred(int64_t pred, bool &value);
 public:
+  void add_instruction(WeftInstruction *instruction);
+public:
   const unsigned thread_id;
   Program *const program;
 protected:
   std::map<std::string,int64_t/*addr*/>           shared_locations;
   std::map<int64_t/*register*/,int64_t/*value*/>  register_store;
   std::map<int64_t/*predicate*/,bool/*value*/>    predicate_store;
+protected:
+  std::vector<WeftInstruction*>                   instructions;
 };
 
 #endif //__PROGRAM_H__

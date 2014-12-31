@@ -165,6 +165,13 @@ Thread::Thread(unsigned tid, Program *p)
 
 Thread::~Thread(void)
 {
+  // Clean up our instructions
+  for (std::vector<WeftInstruction*>::iterator it = 
+        instructions.begin(); it != instructions.end(); it++)
+  {
+    delete (*it);
+  }
+  instructions.clear();
 }
 
 void Thread::emulate(void)
@@ -240,5 +247,10 @@ bool Thread::get_pred(int64_t pred, bool &value)
   }
   value = finder->second;
   return true;
+}
+
+void Thread::add_instruction(WeftInstruction *instruction)
+{
+  instructions.push_back(instruction);
 }
 

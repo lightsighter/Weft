@@ -1162,6 +1162,12 @@ PTXBarrier::PTXBarrier(int64_t n, int64_t c, bool s, int line_num)
 
 PTXInstruction* PTXBarrier::emulate(Thread *thread)
 {
+  WeftInstruction *instruction;
+  if (sync)
+    instruction = new BarrierWait(name, count, this, thread);
+  else
+    instruction = new BarrierArrive(name, count, this, thread);
+  thread->add_instruction(instruction);
   return next;
 }
 
@@ -1201,6 +1207,16 @@ PTXSharedAccess::PTXSharedAccess(int64_t a, int64_t o, bool w, int line_num)
 
 PTXInstruction* PTXSharedAccess::emulate(Thread *thread)
 {
+  int64_t value;
+  if (!thread->get_value(addr, value))
+    return next;
+  int64_t address = value + offset;
+  WeftInstruction *instruction;
+  if (write)
+    instruction = new SharedWrite(address, this, thread);
+  else
+    instruction = new SharedRead(address, this, thread);
+  thread->add_instruction(instruction);
   return next;
 }
 
@@ -1284,5 +1300,30 @@ bool PTXConvertAddress::interpret(const std::string &line, int line_num,
     return true;
   }
   return false;
+}
+
+WeftInstruction::WeftInstruction(PTXInstruction *inst, Thread *t)
+  : instruction(inst), thread(t)
+{
+}
+
+BarrierWait::BarrierWait(int n, int c, PTXBarrier *bar, Thread *thread)
+  : WeftInstruction(bar, thread), name(n), count(c), barrier(bar)
+{
+}
+
+BarrierArrive::BarrierArrive(int n, int c, PTXBarrier *bar, Thread *thread)
+  : WeftInstruction(bar, thread), name(n), count(c), barrier(bar)
+{
+}
+
+SharedWrite::SharedWrite(int addr, PTXSharedAccess *acc, Thread *thread)
+  : WeftInstruction(acc, thread), address(addr), access(acc)
+{
+}
+
+SharedRead::SharedRead(int addr, PTXSharedAccess *acc, Thread *thread)
+  : WeftInstruction(acc, thread), address(addr), access(acc)
+{
 }
 
