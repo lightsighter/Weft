@@ -1,5 +1,6 @@
 
 #include "weft.h"
+#include "graph.h"
 #include "program.h"
 
 #include <string>
@@ -19,8 +20,9 @@
 
 Weft::Weft(int argc, char **argv)
   : file_name(NULL), max_num_threads(-1), 
-    thread_pool_size(1), verbose(false),
-    instrument(false), program(NULL), 
+    thread_pool_size(1), max_num_barriers(1),
+    verbose(false), instrument(false), 
+    warnings(false), program(NULL), graph(NULL),
     worker_threads(NULL), pending_count(0)
 {
   parse_inputs(argc, argv);  
@@ -34,6 +36,11 @@ Weft::~Weft(void)
   {
     delete program;
     program = NULL;
+  }
+  if (graph != NULL)
+  {
+    delete graph;
+    graph = NULL;
   }
   for (std::vector<Thread*>::iterator it = threads.begin();
         it != threads.end(); it++)
@@ -52,6 +59,16 @@ void Weft::verify(void)
   construct_dependence_graph();
   compute_happens_relationships();
   check_for_race_conditions();
+}
+
+void Weft::report_error(int error_code, const char *message)
+{
+  assert(error_code != WEFT_SUCCESS);
+  fprintf(stderr,"WEFT ERROR %d: %s!\n", error_code, message);
+  fprintf(stderr,"WEFT WILL NOW EXIT...\n");
+  fflush(stderr);
+  stop_threadpool();
+  exit(error_code);
 }
 
 void Weft::parse_inputs(int argc, char **argv)
@@ -83,6 +100,11 @@ void Weft::parse_inputs(int argc, char **argv)
       verbose = true;
       continue;
     }
+    if (!strcmp(argv[i],"-w"))
+    {
+      warnings = true;
+      continue;
+    }
     // If it has a ptx ending then guess it is the file name
     std::string file(argv[i]);
     if (file.find(".ptx") != std::string::npos)
@@ -101,18 +123,22 @@ void Weft::parse_inputs(int argc, char **argv)
     fprintf(stdout,"  Max Number of Threads: %d\n", max_num_threads);
     fprintf(stdout,"  Thread Pool Size: %d\n", thread_pool_size);
     fprintf(stdout,"  Verbose: %s\n", (verbose ? "yes" : "no"));
+    fprintf(stdout,"  Instrument: %s\n", (instrument ? "yes" : "no"));
+    fprintf(stdout,"  Report Warnings: %s\n", (warnings ? "yes" : "no"));
   }
 }
 
 void Weft::report_usage(int error, const char *error_str)
 {
-  fprintf(stderr,"WEFT ERROR %d: %s! WEFT WILL NOW EXIT!\n", error, error_str);
+  fprintf(stderr,"WEFT ERROR %d: %s\n! WEFT WILL NOW EXIT...\n", 
+          error, error_str);
   fprintf(stderr,"Usage: Weft [args]\n");
   fprintf(stderr,"  -f: specify the input file\n");
   fprintf(stderr,"  -i: instrument execution\n");
   fprintf(stderr,"  -n: maximum number of threads per CTA\n");
   fprintf(stderr,"  -t: thread pool size\n");
   fprintf(stderr,"  -v: print verbose output\n");
+  fprintf(stderr,"  -w: report emulation warnings\n");
   exit(error);
 }
 
@@ -124,15 +150,15 @@ void Weft::parse_ptx(void)
   if (instrument)
     start_instrumentation(0/*stage*/);
   assert(program == NULL);
-  program = new Program();
-  max_num_threads = program->parse_ptx_file(file_name, max_num_threads);
+  program = new Program(this);
+  program->parse_ptx_file(file_name, max_num_threads);
   if (max_num_threads <= 0)
   {
-    fprintf(stderr,"WEFT ERROR %d: Failed to find max number of threads "
+    char buffer[1024];
+    snprintf(buffer, 1023," Failed to find max number of threads "
                    "in file %s and the value was not set on the command "
-                   "line using the '-n' flag!\n",
-                   WEFT_ERROR_NO_THREAD_COUNT, file_name);
-    exit(WEFT_ERROR_NO_THREAD_COUNT);
+                   "line using the '-n' flag", file_name);
+    report_error(WEFT_ERROR_NO_THREAD_COUNT, buffer);
   }
   if (instrument)
     stop_instrumentation(0/*stage*/);
@@ -158,6 +184,20 @@ void Weft::emulate_threads(void)
     enqueue_task(task);
   }
   wait_until_done();
+  // Get the maximum barrier ID from all threads
+  for (int i = 0; i < max_num_threads; i++)
+  {
+    int local_max = threads[i]->get_max_barrier_name();
+    if ((local_max+1) > max_num_barriers)
+      max_num_barriers = (local_max+1);
+  }
+  if (verbose)
+  {
+    fprintf(stdout,"WEFT INFO: Emulation found %d named barriers.\n",
+                    max_num_barriers);
+    program->report_statistics(threads);
+  }
+
   if (instrument)
     stop_instrumentation(1/*stage*/);
 }
@@ -168,6 +208,23 @@ void Weft::construct_dependence_graph(void)
     fprintf(stdout,"WEFT INFO: Constructing barrier dependence graph...\n");
   if (instrument)
     start_instrumentation(2/*stage*/);
+
+  assert(graph == NULL);
+  graph = new BarrierDependenceGraph(this);
+  graph->construct_graph(threads);
+
+  // Validate the graph 
+  int total_validation_tasks = graph->count_validation_tasks();
+  if (verbose)
+    fprintf(stdout,"WEFT INFO: Performing %d graph validation checks...\n",
+                              total_validation_tasks);
+  if (total_validation_tasks > 0)
+  {
+    initialize_count(total_validation_tasks);
+    graph->enqueue_validation_tasks();
+    wait_until_done();
+    graph->check_for_validation_errors();
+  }
 
   if (instrument)
     stop_instrumentation(2/*stage*/);
@@ -370,7 +427,7 @@ void Weft::report_instrumentation(void)
 }
 
 EmulateTask::EmulateTask(Thread *t)
-  : thread(t)
+  : WeftTask(), thread(t)
 {
 }
 

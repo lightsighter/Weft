@@ -1155,19 +1155,38 @@ bool PTXSelectPred::interpret(const std::string &line, int line_num,
   return false;
 }
 
-PTXBarrier::PTXBarrier(int64_t n, int64_t c, bool s, int line_num)
-  : PTXInstruction(PTX_BARRIER, line_num), name(n), count(c), sync(s)
+PTXBarrier::PTXBarrier(int64_t n, int64_t c, bool s, 
+                       bool name_imm, bool count_imm, int line_num)
+  : PTXInstruction(PTX_BARRIER, line_num), name(n), 
+    count(c), sync(s), name_immediate(name_imm), count_immediate(count_imm)
 {
 }
 
 PTXInstruction* PTXBarrier::emulate(Thread *thread)
 {
   WeftInstruction *instruction;
-  if (sync)
-    instruction = new BarrierWait(name, count, this, thread);
+  int64_t name_value;
+  if (!name_immediate)
+  {
+    if (!thread->get_value(name, name_value))
+      return next;
+  }
   else
-    instruction = new BarrierArrive(name, count, this, thread);
+    name_value = name;
+  int64_t count_value;
+  if (!count_immediate)
+  {
+    if (!thread->get_value(count, count_value))
+      return next;
+  }
+  else
+    count_value = count;
+  if (sync)
+    instruction = new BarrierSync(name_value, count_value, this, thread);
+  else
+    instruction = new BarrierArrive(name_value, count_value, this, thread);
   thread->add_instruction(instruction);
+  thread->update_max_barrier_name(name_value);
   return next;
 }
 
@@ -1175,7 +1194,10 @@ void PTXBarrier::update_count(unsigned arrival_count)
 {
   // If we didn't have a count before, set it to the full CTA width
   if (count < 0)
+  {
     count = arrival_count;
+    count_immediate = true;
+  }
 }
 
 /*static*/
@@ -1188,12 +1210,30 @@ bool PTXBarrier::interpret(const std::string &line, int line_num,
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert((tokens.size() == 2) || (tokens.size() == 3));
-    int64_t name = parse_immediate(tokens[1]);
+    bool name_immediate = false;
+    int64_t name;
+    if (tokens[1].find("%") == std::string::npos)
+    {
+      name = parse_immediate(tokens[1]);
+      name_immediate = true;
+    }
+    else
+      name = parse_register(tokens[1]);
     int64_t count = -1;
+    bool count_immediate = false;
     if (tokens.size() == 3)
-      count = parse_immediate(tokens[2]);
+    {
+      if (tokens[2].find("%") == std::string::npos)
+      {
+        count = parse_immediate(tokens[2]);
+        count_immediate = true;
+      }
+      else
+        count = parse_register(tokens[2]);
+    }
     bool sync = (line.find("arrive") == std::string::npos);
-    result = new PTXBarrier(name, count, sync, line_num);
+    result = new PTXBarrier(name, count, sync, name_immediate, 
+                            count_immediate, line_num);
     return true;
   }
   return false;
@@ -1303,27 +1343,37 @@ bool PTXConvertAddress::interpret(const std::string &line, int line_num,
 }
 
 WeftInstruction::WeftInstruction(PTXInstruction *inst, Thread *t)
-  : instruction(inst), thread(t)
+  : instruction(inst), thread(t), thread_line_number(t->get_program_size())
 {
 }
 
-BarrierWait::BarrierWait(int n, int c, PTXBarrier *bar, Thread *thread)
+WeftBarrier::WeftBarrier(int n, int c, PTXBarrier *bar, Thread *thread)
   : WeftInstruction(bar, thread), name(n), count(c), barrier(bar)
+{
+}
+
+BarrierSync::BarrierSync(int n, int c, PTXBarrier *bar, Thread *thread)
+  : WeftBarrier(n, c, bar, thread)
 {
 }
 
 BarrierArrive::BarrierArrive(int n, int c, PTXBarrier *bar, Thread *thread)
-  : WeftInstruction(bar, thread), name(n), count(c), barrier(bar)
+  : WeftBarrier(n, c, bar, thread)
+{
+}
+
+WeftAccess::WeftAccess(int addr, PTXSharedAccess *acc, Thread *thread)
+  : WeftInstruction(acc, thread), address(addr), access(acc)
 {
 }
 
 SharedWrite::SharedWrite(int addr, PTXSharedAccess *acc, Thread *thread)
-  : WeftInstruction(acc, thread), address(addr), access(acc)
+  : WeftAccess(addr, acc, thread)
 {
 }
 
 SharedRead::SharedRead(int addr, PTXSharedAccess *acc, Thread *thread)
-  : WeftInstruction(acc, thread), address(addr), access(acc)
+  : WeftAccess(addr, acc, thread)
 {
 }
 

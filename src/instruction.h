@@ -52,6 +52,12 @@ class Thread;
 class PTXLabel;
 class PTXBranch;
 class PTXBarrier;
+class WeftBarrier;
+class WeftAccess;
+class BarrierSync;
+class BarrierArrive;
+class SharedWrite;
+class SharedRead;
 
 class PTXInstruction {
 public:
@@ -78,9 +84,10 @@ public:
 public:
   static uint64_t compress_identifier(const char *buffer, size_t buffer_size);
   static void decompress_identifier(uint64_t id, char *buffer, size_t buffer_size);
-protected:
+public:
   const PTXKind kind;
   const int line_number;
+protected:
   PTXInstruction *next;
 };
 
@@ -372,7 +379,8 @@ public:
 
 class PTXBarrier : public PTXInstruction {
 public:
-  PTXBarrier(int64_t name, int64_t count, bool sync, int line_num);
+  PTXBarrier(int64_t name, int64_t count, bool sync, 
+             bool name_imm, bool count_imm, int line_num);
   PTXBarrier(const PTXBarrier &rhs) { assert(false); }
   virtual ~PTXBarrier(void) { }
 public:
@@ -383,9 +391,11 @@ public:
   virtual bool is_barrier(void) const { return true; }
   virtual PTXBarrier* as_barrier(void) { return this; }
   void update_count(unsigned arrival_count);
+  int get_barrier_name(void) const { return name; }
 protected:
   int64_t name, count;
   bool sync;
+  bool name_immediate, count_immediate;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);
@@ -445,69 +455,119 @@ public:
 class WeftInstruction {
 public:
   WeftInstruction(PTXInstruction *instruction, Thread *thread);
-  WeftInstruction(const WeftInstruction &rhs) 
-    : instruction(NULL), thread(NULL) { assert(false); }
+  WeftInstruction(const WeftInstruction &rhs) : instruction(NULL), 
+    thread(NULL), thread_line_number(-1) { assert(false); }
   virtual ~WeftInstruction(void) { }
 public:
   WeftInstruction& operator=(const WeftInstruction &rhs)
     { assert(false); return *this; }
 public:
+  virtual bool is_barrier(void) const { return false; }
+  virtual WeftBarrier* as_barrier(void) { return NULL; }
+public:
+  virtual bool is_access(void) const { return false; }
+  virtual WeftAccess* as_access(void) { return NULL; }
+public:
+  virtual bool is_sync(void) const { return false; }
+  virtual BarrierSync* as_sync(void) { return NULL; }
+public:
+  virtual bool is_arrive(void) const { return false; }
+  virtual BarrierArrive* as_arrive(void) { return NULL; }
+public:
+  virtual bool is_write(void) const { return false; }
+  virtual SharedWrite* as_write(void) { return NULL; }
+public:
+  virtual bool is_read(void) const { return false; }
+  virtual SharedRead* as_read(void) { return NULL; }
+public:
   PTXInstruction *const instruction;
   Thread *const thread;
+  const int thread_line_number;
 };
 
-class BarrierWait : public WeftInstruction {
+class WeftBarrier : public WeftInstruction {
 public:
-  BarrierWait(int name, int count, PTXBarrier *bar, Thread *thread);
-  BarrierWait(const BarrierWait &rhs) : WeftInstruction(NULL, NULL), 
+  WeftBarrier(int name, int count, PTXBarrier *bar, Thread *thread);
+  WeftBarrier(const WeftBarrier &rhs) : WeftInstruction(NULL, NULL),
     name(0), count(0), barrier(NULL) { assert(false); }
-  virtual ~BarrierWait(void) { }
+  virtual ~WeftBarrier(void) { }
 public:
-  BarrierWait& operator=(const BarrierWait &rhs) { assert(false); return *this; }
+  WeftBarrier& operator=(const WeftBarrier &rhs) { assert(false); return *this; }
+public:
+  virtual bool is_barrier(void) const { return true; }
+  virtual WeftBarrier* as_barrier(void) { return this; }
 public:
   const int name;
   const int count;
   PTXBarrier *const barrier;
 };
 
-class BarrierArrive : public WeftInstruction {
+class BarrierSync : public WeftBarrier {
+public:
+  BarrierSync(int name, int count, PTXBarrier *bar, Thread *thread);
+  BarrierSync(const BarrierSync &rhs) : WeftBarrier(0, 0, NULL, NULL)
+    { assert(false); }
+  virtual ~BarrierSync(void) { }
+public:
+  BarrierSync& operator=(const BarrierSync &rhs) { assert(false); return *this; }
+public:
+  virtual bool is_sync(void) const { return true; }
+  virtual BarrierSync* as_sync(void) { return this; }
+};
+
+class BarrierArrive : public WeftBarrier {
 public:
   BarrierArrive(int name, int count, PTXBarrier *bar, Thread *thread);
-  BarrierArrive(const BarrierArrive &rhs) : WeftInstruction(NULL, NULL), 
-    name(0), count(0), barrier(NULL) { assert(false); }
+  BarrierArrive(const BarrierArrive &rhs) : WeftBarrier(0, 0, NULL, NULL)
+    { assert(false); }
   virtual ~BarrierArrive(void) { }
 public:
   BarrierArrive& operator=(const BarrierArrive &rhs) { assert(false); return *this; }
 public:
-  const int name;
-  const int count;
-  PTXBarrier *const barrier;
+  virtual bool is_arrive(void) const { return true; }
+  virtual BarrierArrive* as_arrive(void) { return this; }
 };
 
-class SharedWrite : public WeftInstruction {
+class WeftAccess : public WeftInstruction {
+public:
+  WeftAccess(int address, PTXSharedAccess *access, Thread *thread);
+  WeftAccess(const WeftAccess &rhs) : WeftInstruction(NULL, NULL),
+    address(0), access(NULL) { assert(false); }
+  virtual ~WeftAccess(void) { }
+public:
+  WeftAccess& operator=(const WeftAccess &rhs) { assert(false); return *this; }
+public:
+  virtual bool is_access(void) const { return true; }
+  virtual WeftAccess* as_access(void) { return this; }
+public:
+  const int address;
+  PTXSharedAccess *const access;
+};
+
+class SharedWrite : public WeftAccess {
 public:
   SharedWrite(int address, PTXSharedAccess *access, Thread *thread);
-  SharedWrite(const SharedWrite &rhs) : WeftInstruction(NULL, NULL),
-    address(0), access(NULL) { assert(false); }
+  SharedWrite(const SharedWrite &rhs) : WeftAccess(0, NULL, NULL)
+    { assert(false); }
   virtual ~SharedWrite(void) { }
 public:
   SharedWrite& operator=(const SharedWrite &rhs) { assert(false); return *this; }
 public:
-  const int address;
-  PTXSharedAccess *const access;
+  virtual bool is_write(void) const { return true; }
+  virtual SharedWrite* as_write(void) { return this; }
 };
 
-class SharedRead : public WeftInstruction {
+class SharedRead : public WeftAccess {
 public:
   SharedRead(int address, PTXSharedAccess *access, Thread *thread);
-  SharedRead(const SharedRead &rhs) : WeftInstruction(NULL, NULL),
-    address(0), access(NULL) { assert(false); }
+  SharedRead(const SharedRead &rhs) : WeftAccess(0, NULL, NULL)
+    { assert(false); }
   virtual ~SharedRead(void) { }
 public:
   SharedRead& operator=(const SharedRead &rhs) { assert(false); return *this; }
 public:
-  const int address;
-  PTXSharedAccess *const access;
+  virtual bool is_read(void) const { return true; }
+  virtual SharedRead* as_read(void) { return this; }
 };
 
 #endif // __INSTRUCTION_H__

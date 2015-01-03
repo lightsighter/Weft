@@ -12,11 +12,13 @@
 #include <cassert>
 #include <cstdlib>
 
-Program::Program(void)
+Program::Program(Weft *w)
+  : weft(w)
 {
 }
 
 Program::Program(const Program &rhs)
+  : weft(NULL)
 {
   // should never be called
   assert(false);
@@ -39,7 +41,7 @@ Program& Program::operator=(const Program &rhs)
   return *this;
 }
 
-int Program::parse_ptx_file(const char *file_name, int max_num_threads)
+void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
 {
   std::ifstream file(file_name);
   std::vector<std::pair<std::string,int> > lines;
@@ -63,11 +65,11 @@ int Program::parse_ptx_file(const char *file_name, int max_num_threads)
         {
           if (temp != max_num_threads)
           {
-            fprintf(stderr,"WEFT ERROR %d: Found max thread count %d "
+            char buffer[1024];
+            snprintf(buffer, 1023, "Found max thread count %d "
                            "which does not agree with specified count "
-                           "of %d!\n", WEFT_ERROR_THREAD_COUNT_MISMATCH,
-                           temp, max_num_threads);
-            exit(WEFT_ERROR_THREAD_COUNT_MISMATCH);
+                           "of %d", temp, max_num_threads);
+            weft->report_error(WEFT_ERROR_THREAD_COUNT_MISMATCH, buffer);
           }
         }
         else
@@ -79,14 +81,12 @@ int Program::parse_ptx_file(const char *file_name, int max_num_threads)
   }
   else
   {
-    fprintf(stderr,"WEFT ERROR %d: unable to open file %s!\n",
-            WEFT_ERROR_FILE_OPEN, file_name);
-    exit(WEFT_ERROR_FILE_OPEN);
+    char buffer[1024];
+    snprintf(buffer, 1023, "Unable to open file %s", file_name);
+    weft->report_error(WEFT_ERROR_FILE_OPEN, buffer);
   }
   // Once we have the lines, then convert them into static PTX instructions
   convert_to_instructions(max_num_threads, lines);
-
-  return max_num_threads;
 }
 
 void Program::report_statistics(void)
@@ -110,11 +110,45 @@ void Program::report_statistics(void)
   fprintf(stdout,"\n");
 }
 
+void Program::report_statistics(const std::vector<Thread*> &threads)
+{
+  int total_count = 0;
+  std::vector<int> instruction_counts(PTX_LAST, 0);
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+  {
+    total_count += (*it)->accumulate_instruction_counts(instruction_counts);
+  }
+  fprintf(stdout,"WEFT INFO: Program Statistics\n");
+  fprintf(stdout,"  Dynamic Instructions: %d\n", total_count);
+  fprintf(stdout,"  Instruction Counts\n");
+  for (unsigned idx = 0; idx < PTX_LAST; idx++)
+  {
+    if (instruction_counts[idx] == 0)
+      continue;
+    fprintf(stdout,"    Instruction %s: %d\n", 
+       PTXInstruction::get_kind_name((PTXKind)idx), instruction_counts[idx]);
+  }
+  fprintf(stdout,"\n");
+}
+
 void Program::emulate(Thread *thread)
 {
   PTXInstruction *pc = ptx_instructions.front();
-  while (pc != NULL)
-    pc = pc->emulate(thread);
+  bool profile = weft->print_verbose();
+  if (profile)
+  {
+    while (pc != NULL)
+    {
+      thread->profile_instruction(pc);
+      pc = pc->emulate(thread);
+    }
+  }
+  else
+  {
+    while (pc != NULL)
+      pc = pc->emulate(thread);
+  }
 }
 
 void Program::convert_to_instructions(int max_num_threads,
@@ -159,8 +193,9 @@ void Program::convert_to_instructions(int max_num_threads,
 }
 
 Thread::Thread(unsigned tid, Program *p)
-  : thread_id(tid), program(p)
+  : thread_id(tid), program(p), max_barrier_name(-1)
 {
+  dynamic_counts.resize(PTX_LAST, 0);
 }
 
 Thread::~Thread(void)
@@ -199,8 +234,11 @@ bool Thread::find_shared_location(const std::string &name, int64_t &addr)
   std::map<std::string,int64_t>::const_iterator finder = 
     shared_locations.find(name);
   if (finder == shared_locations.end()) {
-    fprintf(stderr,"WEFT WARNING: Unable to find shared "
-                   "memory location %s\n", name.c_str());
+    if (program->weft->report_warnings())
+    {
+      fprintf(stderr,"WEFT WARNING: Unable to find shared "
+                     "memory location %s\n", name.c_str());
+    }
     return false;
   }
   addr = finder->second;
@@ -217,11 +255,12 @@ bool Thread::get_value(int64_t reg, int64_t &value)
   std::map<int64_t,int64_t>::const_iterator finder = 
     register_store.find(reg);
   if (finder == register_store.end()) {
-#if 0
-    char buffer[11];
-    PTXInstruction::decompress_identifier(reg, buffer, 11);
-    fprintf(stderr,"WEFT WARNING: Unable to find register %s\n", buffer);
-#endif
+    if (program->weft->report_warnings())
+    {
+      char buffer[11];
+      PTXInstruction::decompress_identifier(reg, buffer, 11);
+      fprintf(stderr,"WEFT WARNING: Unable to find register %s\n", buffer);
+    }
     return false;
   }
   value = finder->second;
@@ -238,11 +277,12 @@ bool Thread::get_pred(int64_t pred, bool &value)
   std::map<int64_t,bool>::const_iterator finder = 
     predicate_store.find(pred);
   if (finder == predicate_store.end()) {
-#if 0
-    char buffer[11];
-    PTXInstruction::decompress_identifier(pred, buffer, 11);
-    fprintf(stderr,"WEFT WARNING: Unable to find predicate %s\n", buffer);
-#endif
+    if (program->weft->report_warnings())
+    {
+      char buffer[11];
+      PTXInstruction::decompress_identifier(pred, buffer, 11);
+      fprintf(stderr,"WEFT WARNING: Unable to find predicate %s\n", buffer);
+    }
     return false;
   }
   value = finder->second;
@@ -252,5 +292,29 @@ bool Thread::get_pred(int64_t pred, bool &value)
 void Thread::add_instruction(WeftInstruction *instruction)
 {
   instructions.push_back(instruction);
+}
+
+void Thread::update_max_barrier_name(int name)
+{
+  if (name > max_barrier_name)
+    max_barrier_name = name;
+}
+
+void Thread::profile_instruction(PTXInstruction *instruction)
+{
+  int kind = instruction->get_kind();  
+  dynamic_counts[kind]++;
+}
+
+int Thread::accumulate_instruction_counts(std::vector<int> &total_counts)
+{
+  int total = 0; 
+  assert(total_counts.size() == dynamic_counts.size());
+  for (unsigned idx = 0; idx < total_counts.size(); idx++)
+  {
+    total_counts[idx] += dynamic_counts[idx];
+    total += dynamic_counts[idx];
+  }
+  return total;
 }
 
