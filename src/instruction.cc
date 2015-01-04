@@ -1267,12 +1267,13 @@ PTXInstruction* PTXSharedAccess::emulate(Thread *thread)
   if (!thread->get_value(addr, value))
     return next;
   int64_t address = value + offset;
-  WeftInstruction *instruction;
+  WeftAccess *instruction;
   if (write)
     instruction = new SharedWrite(address, this, thread);
   else
     instruction = new SharedRead(address, this, thread);
   thread->add_instruction(instruction);
+  thread->update_shared_memory(instruction);
   return next;
 }
 

@@ -17,18 +17,18 @@
 #ifndef __PROGRAM_H__
 #define __PROGRAM_H__
 
-class Weft;
-class Thread;
-class PTXInstruction;
-class WeftInstruction;
-
 #include <map>
 #include <deque>
 #include <vector>
 #include <cassert>
 
+class Weft;
 class Thread;
 class Happens;
+class WeftAccess;
+class SharedMemory;
+class PTXInstruction;
+class WeftInstruction;
 
 class Program {
 public:
@@ -54,8 +54,9 @@ protected:
 
 class Thread {
 public:
-  Thread(unsigned thread_id, Program *p);
-  Thread(const Thread &rhs) : thread_id(0), program(NULL) { assert(false); }
+  Thread(unsigned thread_id, Program *p, SharedMemory *s);
+  Thread(const Thread &rhs) : thread_id(0), 
+    program(NULL), shared_memory(NULL) { assert(false); }
   ~Thread(void);
 public:
   Thread& operator=(const Thread &rhs) { assert(false); return *this; }
@@ -78,6 +79,8 @@ public:
   void profile_instruction(PTXInstruction *instruction);
   int accumulate_instruction_counts(std::vector<int> &total_counts);
 public:
+  void update_shared_memory(WeftAccess *access);
+public:
   inline size_t get_program_size(void) const { return instructions.size(); }
   inline WeftInstruction* get_instruction(int idx)
   { return ((idx < instructions.size()) ? instructions[idx] : NULL); } 
@@ -91,6 +94,7 @@ protected:
 public:
   const unsigned thread_id;
   Program *const program;
+  SharedMemory *const shared_memory;
 protected:
   std::map<std::string,int64_t/*addr*/>           shared_locations;
   std::map<int64_t/*register*/,int64_t/*value*/>  register_store;

@@ -48,6 +48,8 @@ enum {
 class Weft;
 class Thread;
 class Program;
+class Address;
+class SharedMemory;
 class BarrierInstance;
 class BarrierDependenceGraph;
 
@@ -151,6 +153,20 @@ public:
   Thread *const thread;
 };
 
+class RaceCheckTask : public WeftTask {
+public:
+  RaceCheckTask(Address *address);
+  RaceCheckTask(const RaceCheckTask &rhs) : address(NULL) { assert(false); }
+  virtual ~RaceCheckTask(void) { }
+public:
+  RaceCheckTask& operator=(const RaceCheckTask &rhs)
+    { assert(false); return *this; }
+public:
+  virtual void execute(void);
+public:
+  Address *address;
+};
+
 class Weft {
 public:
   Weft(int argc, char **argv);
@@ -195,9 +211,11 @@ protected:
   bool verbose;
   bool instrument;
   bool warnings;
+  bool warp_synchronous;
 protected:
   Program *program;
   std::vector<Thread*> threads;
+  SharedMemory *shared_memory;
 protected:
   BarrierDependenceGraph *graph;
 protected:

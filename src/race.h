@@ -17,9 +17,14 @@
 #ifndef __RACE_H__
 #define __RACE_H__
 
+#include <map>
+#include <deque>
 #include <vector>
 #include <cassert>
+#include <pthread.h>
 
+class Weft;
+class WeftAccess;
 class WeftBarrier;
 
 class Happens {
@@ -41,5 +46,43 @@ protected:
   std::vector<int> happens_before;
   std::vector<int> happens_after;
 };
+
+class Address {
+public:
+  Address(const int addr);
+  Address(const Address &rhs) : address(0) { assert(false); }
+  ~Address(void);
+public:
+  Address& operator=(const Address &rhs) { assert(false); return *this; }
+public:
+  void add_access(WeftAccess *access);
+  void perform_race_tests(void);
+public:
+  const int address;
+protected:
+  pthread_mutex_t address_lock;
+  std::deque<WeftAccess*> accesses;
+};
+
+class SharedMemory {
+public:
+  SharedMemory(Weft *weft);
+  SharedMemory(const SharedMemory &rhs) : weft(NULL) { assert(false); }
+  ~SharedMemory(void);
+public:
+  SharedMemory& operator=(const SharedMemory &rhs) 
+    { assert(false); return *this; }
+public:
+  void update_accesses(WeftAccess *access);
+  int count_addresses(void) const;
+  void enqueue_race_checks(void);
+  void check_for_races(void);
+public:
+  Weft *const weft;
+protected:
+  pthread_mutex_t memory_lock;
+  std::map<int/*address*/,Address*> addresses;
+};
+
 
 #endif // __RACE_H__

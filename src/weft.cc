@@ -15,6 +15,7 @@
  */
 
 #include "weft.h"
+#include "race.h"
 #include "graph.h"
 #include "program.h"
 
@@ -37,7 +38,8 @@ Weft::Weft(int argc, char **argv)
   : file_name(NULL), max_num_threads(-1), 
     thread_pool_size(1), max_num_barriers(1),
     verbose(false), instrument(false), 
-    warnings(false), program(NULL), graph(NULL),
+    warnings(false), warp_synchronous(false),
+    program(NULL), shared_memory(NULL), graph(NULL),
     worker_threads(NULL), pending_count(0)
 {
   parse_inputs(argc, argv);  
@@ -51,6 +53,11 @@ Weft::~Weft(void)
   {
     delete program;
     program = NULL;
+  }
+  if (shared_memory != NULL)
+  {
+    delete shared_memory;
+    shared_memory = NULL;
   }
   if (graph != NULL)
   {
@@ -105,6 +112,11 @@ void Weft::parse_inputs(int argc, char **argv)
       max_num_threads = atoi(argv[++i]);
       continue;
     }
+    if (!strcmp(argv[i],"-s"))
+    {
+      warp_synchronous = true;
+      continue;
+    }
     if (!strcmp(argv[i],"-t"))
     {
       thread_pool_size = atoi(argv[++i]);
@@ -140,6 +152,7 @@ void Weft::parse_inputs(int argc, char **argv)
     fprintf(stdout,"  Verbose: %s\n", (verbose ? "yes" : "no"));
     fprintf(stdout,"  Instrument: %s\n", (instrument ? "yes" : "no"));
     fprintf(stdout,"  Report Warnings: %s\n", (warnings ? "yes" : "no"));
+    fprintf(stdout,"  Warp-Synchronous Execution: %s\n", (warnings ? "yes" : "no"));
   }
 }
 
@@ -151,6 +164,7 @@ void Weft::report_usage(int error, const char *error_str)
   fprintf(stderr,"  -f: specify the input file\n");
   fprintf(stderr,"  -i: instrument execution\n");
   fprintf(stderr,"  -n: maximum number of threads per CTA\n");
+  fprintf(stderr,"  -s: assume warp-synchronous execution\n");
   fprintf(stderr,"  -t: thread pool size\n");
   fprintf(stderr,"  -v: print verbose output\n");
   fprintf(stderr,"  -w: report emulation warnings\n");
@@ -189,12 +203,14 @@ void Weft::emulate_threads(void)
                    max_num_threads, thread_pool_size);
   if (instrument)
     start_instrumentation(1/*stage*/);
+  assert(shared_memory == NULL);
+  shared_memory = new SharedMemory(this);
   assert(max_num_threads > 0);
   threads.resize(max_num_threads, NULL);
   initialize_count(max_num_threads);
   for (int i = 0; i < max_num_threads; i++)
   {
-    threads[i] = new Thread(i, program); 
+    threads[i] = new Thread(i, program, shared_memory); 
     EmulateTask *task = new EmulateTask(threads[i]);
     enqueue_task(task);
   }
@@ -289,6 +305,11 @@ void Weft::check_for_race_conditions(void)
     fprintf(stdout,"WEFT INFO: Checking for race conditions...\n");
   if (instrument)
     start_instrumentation(4/*stage*/);
+
+  initialize_count(shared_memory->count_addresses());
+  shared_memory->enqueue_race_checks();
+  wait_until_done();
+  shared_memory->check_for_races();
 
   if (instrument)
     stop_instrumentation(4/*stage*/);

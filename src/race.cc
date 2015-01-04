@@ -56,3 +56,90 @@ void Happens::update_happens_relationships(void)
   }
 }
 
+Address::Address(const int addr)
+  : address(addr)
+{
+  PTHREAD_SAFE_CALL( pthread_mutex_init(&address_lock,NULL) );
+}
+
+Address::~Address(void)
+{
+  PTHREAD_SAFE_CALL( pthread_mutex_destroy(&address_lock) );
+}
+
+void Address::add_access(WeftAccess *access)
+{
+  PTHREAD_SAFE_CALL( pthread_mutex_lock(&address_lock) );
+  accesses.push_back(access);
+  PTHREAD_SAFE_CALL( pthread_mutex_unlock(&address_lock) );
+}
+
+void Address::perform_race_tests(void)
+{
+
+}
+
+SharedMemory::SharedMemory(Weft *w)
+  : weft(w)
+{
+  PTHREAD_SAFE_CALL( pthread_mutex_init(&memory_lock,NULL) );
+}
+
+SharedMemory::~SharedMemory(void)
+{
+  for (std::map<int,Address*>::iterator it = addresses.begin();
+        it != addresses.end(); it++)
+  {
+    delete it->second;
+  }
+  addresses.clear();
+  PTHREAD_SAFE_CALL( pthread_mutex_destroy(&memory_lock) );
+}
+
+void SharedMemory::update_accesses(WeftAccess *access)
+{
+  Address *address;
+  // These lookups need to be thread safe
+  PTHREAD_SAFE_CALL( pthread_mutex_lock(&memory_lock) );
+  std::map<int,Address*>::const_iterator finder = 
+    addresses.find(access->address);
+  if (finder == addresses.end())
+  {
+    address = new Address(access->address);
+    addresses[access->address] = address;
+  }
+  else
+    address = finder->second;
+  PTHREAD_SAFE_CALL( pthread_mutex_unlock(&memory_lock) );
+  address->add_access(access);
+}
+
+int SharedMemory::count_addresses(void) const
+{
+  return addresses.size();
+}
+
+void SharedMemory::enqueue_race_checks(void)
+{
+  for (std::map<int,Address*>::const_iterator it = addresses.begin();
+        it != addresses.end(); it++)
+  {
+    weft->enqueue_task(new RaceCheckTask(it->second));
+  }
+}
+
+void SharedMemory::check_for_races(void)
+{
+
+}
+
+RaceCheckTask::RaceCheckTask(Address *addr)
+  : address(addr)
+{
+}
+
+void RaceCheckTask::execute(void)
+{
+  address->perform_race_tests();
+}
+

@@ -208,8 +208,8 @@ void Program::convert_to_instructions(int max_num_threads,
   }
 }
 
-Thread::Thread(unsigned tid, Program *p)
-  : thread_id(tid), program(p), max_barrier_name(-1)
+Thread::Thread(unsigned tid, Program *p, SharedMemory *m)
+  : thread_id(tid), program(p), shared_memory(m), max_barrier_name(-1)
 {
   dynamic_counts.resize(PTX_LAST, 0);
 }
@@ -338,6 +338,11 @@ int Thread::accumulate_instruction_counts(std::vector<int> &total_counts)
     total += dynamic_counts[idx];
   }
   return total;
+}
+
+void Thread::update_shared_memory(WeftAccess *access)
+{
+  shared_memory->update_accesses(access);
 }
 
 void Thread::initialize_happens(int total_threads,
