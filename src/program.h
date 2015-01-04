@@ -8,10 +8,12 @@ class PTXInstruction;
 class WeftInstruction;
 
 #include <map>
+#include <deque>
 #include <vector>
 #include <cassert>
 
 class Thread;
+class Happens;
 
 class Program {
 public:
@@ -65,6 +67,13 @@ public:
   inline WeftInstruction* get_instruction(int idx)
   { return ((idx < instructions.size()) ? instructions[idx] : NULL); } 
 public:
+  void initialize_happens(int total_threads, int max_num_barriers);
+  void update_happens_relationships(void);
+protected:
+  void initialize_happens_instances(int total_threads);
+  void compute_barriers_before(int max_num_barriers);
+  void compute_barriers_after(int max_num_barriers);
+public:
   const unsigned thread_id;
   Program *const program;
 protected:
@@ -75,6 +84,8 @@ protected:
   int max_barrier_name;
   std::vector<WeftInstruction*>                   instructions;
   std::vector<int>                                dynamic_counts;
+protected:
+  std::deque<Happens*>                            all_happens;
 };
 
 #endif //__PROGRAM_H__

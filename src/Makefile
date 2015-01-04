@@ -9,6 +9,7 @@ CC_FLAGS = -ggdb -Wall
 LD_FLAGS = -ggdb -lpthread
 
 FILES = weft.cc \
+	race.cc \
 	graph.cc \
 	program.cc \
 	instruction.cc

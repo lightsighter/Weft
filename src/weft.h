@@ -30,8 +30,10 @@ enum {
   WEFT_ERROR_GRAPH_VALIDATION,
 };
 
-class Program;
+class Weft;
 class Thread;
+class Program;
+class BarrierInstance;
 class BarrierDependenceGraph;
 
 class WeftTask {
@@ -69,6 +71,71 @@ public:
   const int generation;
 };
 
+class InitializationTask : public WeftTask {
+public:
+  InitializationTask(Thread *thread, int total, int max_num_barriers);
+  InitializationTask(const InitializationTask &rhs) 
+    : thread(NULL), total_threads(0), max_num_barriers(0) { assert(false); }
+  virtual ~InitializationTask(void) { }
+public:
+  InitializationTask& operator=(const InitializationTask &rhs)
+    { assert(false); return *this; }
+public:
+  virtual void execute(void);
+public:
+  Thread *const thread;
+  const int total_threads;
+  const int max_num_barriers;
+};
+
+class ReachabilityTask : public WeftTask {
+public:
+  ReachabilityTask(BarrierInstance *instance, Weft *weft, bool forward);
+  ReachabilityTask(const ReachabilityTask &rhs) : instance(NULL),
+    weft(NULL), forward(true) { assert(false); }
+  virtual ~ReachabilityTask(void) { }
+public:
+  ReachabilityTask& operator=(const ReachabilityTask &rhs)
+    { assert(false); return *this; }
+public:
+  virtual void execute(void);
+public:
+  BarrierInstance *const instance;
+  Weft *const weft;
+  const bool forward;
+};
+
+class TransitiveTask : public WeftTask {
+public:
+  TransitiveTask(BarrierInstance *instance, Weft *weft, bool forward);
+  TransitiveTask(const TransitiveTask &rhs) : instance(NULL),
+    weft(NULL), forward(true) { assert(false); }
+  virtual ~TransitiveTask(void) { }
+public:
+  TransitiveTask& operator=(const TransitiveTask &rhs)
+    { assert(false); return *this; }
+public:
+  virtual void execute(void);
+public:
+  BarrierInstance *const instance;
+  Weft *const weft;
+  const bool forward;
+};
+
+class UpdateThreadTask : public WeftTask {
+public:
+  UpdateThreadTask(Thread *thread);
+  UpdateThreadTask(const UpdateThreadTask &rhs) : thread(NULL) { assert(false); }
+  virtual ~UpdateThreadTask(void) { }
+public:
+  UpdateThreadTask& operator=(const UpdateThreadTask &rhs) 
+    { assert(false); return *this; }  
+public:
+  virtual void execute(void);
+public:
+  Thread *const thread;
+};
+
 class Weft {
 public:
   Weft(int argc, char **argv);
@@ -77,6 +144,7 @@ public:
   void verify(void);
   void report_error(int error_code, const char *message);
   inline bool report_warnings(void) const { return warnings; }
+  inline int thread_count(void) const { return max_num_threads; }
   inline int barrier_upper_bound(void) const { return max_num_barriers; }
   inline bool print_verbose(void) const { return verbose; }
 protected:

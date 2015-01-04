@@ -1,4 +1,5 @@
 
+#include "race.h"
 #include "program.h"
 #include "instruction.h"
 
@@ -1343,8 +1344,16 @@ bool PTXConvertAddress::interpret(const std::string &line, int line_num,
 }
 
 WeftInstruction::WeftInstruction(PTXInstruction *inst, Thread *t)
-  : instruction(inst), thread(t), thread_line_number(t->get_program_size())
+  : instruction(inst), thread(t), thread_line_number(t->get_program_size()),
+    happens_relationship(NULL)
 {
+}
+
+void WeftInstruction::initialize_happens(Happens *happens)
+{
+  assert(happens != NULL);
+  assert(happens_relationship == NULL);
+  happens_relationship = happens;
 }
 
 WeftBarrier::WeftBarrier(int n, int c, PTXBarrier *bar, Thread *thread)

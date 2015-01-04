@@ -6,14 +6,15 @@
 
 BarrierInstance::BarrierInstance(BarrierDependenceGraph *g,
                                  int n, int gen)
-  : graph(g), name(n), generation(gen)
+  : graph(g), name(n), generation(gen),
+    base_incoming(-1), base_outgoing(-1)
 {
   incoming.resize(graph->max_num_barriers, NULL);
   outgoing.resize(graph->max_num_barriers, NULL);
 }
 
 BarrierInstance::BarrierInstance(const BarrierInstance &rhs)
-  : graph(NULL), name(0), generation(0)
+  : graph(NULL), name(0), generation(0) 
 {
   assert(false);
 }
@@ -97,6 +98,7 @@ void BarrierInstance::add_participant(WeftBarrier *participant, bool sync)
 void BarrierInstance::add_incoming(BarrierInstance *other)
 {
   assert(other != NULL);
+  assert(generation > 0);
   BarrierInstance *&current = incoming[other->name];
   // Keep the latest one before the barrier
   if ((current == NULL) || (other->generation > current->generation))
@@ -110,6 +112,210 @@ void BarrierInstance::add_outgoing(BarrierInstance *other)
   // Keep the earliest after the barrier
   if ((current == NULL) || (other->generation < current->generation))
     current = other;
+}
+
+void BarrierInstance::initialize_pending_counts(void)
+{
+  // If we haven't computed it yet, do it now
+  if (base_incoming == -1)
+  {
+    base_incoming = 0;
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          incoming.begin(); it != incoming.end(); it++)
+    {
+      if ((*it) != NULL)
+        base_incoming++;
+    }
+  }
+  if (base_outgoing == -1)
+  {
+    base_outgoing = 0;
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          outgoing.begin(); it != outgoing.end(); it++)
+    {
+      if ((*it) != NULL)
+        base_outgoing++;
+    }
+  }
+  // +1 because we do an initial check
+  pending_incoming = base_incoming + 1;
+  pending_outgoing = base_outgoing + 1;
+}
+
+template<typename T>
+void BarrierInstance::launch_if_ready(Weft *weft, bool forward)
+{
+  if (forward)
+  {
+    int remaining = __sync_sub_and_fetch(&pending_incoming, 1);
+    if (remaining == 0)
+      weft->enqueue_task(new T(this, weft, true/*forward*/));
+  }
+  else
+  {
+    int remaining = __sync_sub_and_fetch(&pending_outgoing, 1);
+    if (remaining == 0)
+      weft->enqueue_task(new T(this, weft, false/*forward*/));
+  }
+}
+
+template<typename T>
+void BarrierInstance::notify_dependences(Weft *weft, bool forward)
+{
+  if (forward)
+  {
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          outgoing.begin(); it != outgoing.end(); it++)
+    {
+      if ((*it) == NULL)
+        continue;
+      (*it)->launch_if_ready<T>(weft, true/*forward*/);
+    }
+  }
+  else
+  {
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          incoming.begin(); it != incoming.end(); it++)
+    {
+      if ((*it) == NULL)
+        continue;
+      (*it)->launch_if_ready<T>(weft, false/*forward*/);
+    }
+  }
+}
+
+void BarrierInstance::compute_reachability(Weft *weft, bool forward)
+{
+  // Do the computation
+  if (forward)
+  {
+    // Initialize our vector with our incoming
+    latest_incoming = incoming;
+    // Then update the incoming based on what all our incoming can reach
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          incoming.begin(); it != incoming.end(); it++)
+    {
+      if ((*it) == NULL)
+        continue;
+      (*it)->update_latest_incoming(latest_incoming);
+    }
+  }
+  else
+  {
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          outgoing.begin(); it != outgoing.end(); it++)
+    {
+      if ((*it) == NULL)
+        continue;
+      (*it)->update_earliest_outgoing(earliest_outgoing);
+    }
+  }
+  // Then update all our dependences
+  notify_dependences<ReachabilityTask>(weft, forward);
+}
+
+void BarrierInstance::compute_transitivity(Weft *weft, bool forward)
+{
+  // Do the computation
+  // Initialize our line numbers
+  // Then do the transitive update
+  if (forward)
+  {
+    latest_before.resize(graph->weft->thread_count(), -1);
+    for (std::vector<WeftBarrier*>::const_iterator it = 
+          participants.begin(); it != participants.end(); it++)
+    {
+      latest_before[(*it)->thread->thread_id] = (*it)->thread_line_number;
+    }
+    // Now check all our latest incoming barriers for transitive cases
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          latest_incoming.begin(); it != latest_incoming.end(); it++)
+    {
+      if ((*it) == NULL)
+        continue;
+      (*it)->update_latest_before(latest_before);
+    }
+  }
+  else
+  {
+    earliest_after.resize(graph->weft->thread_count(), -1);
+    for (std::vector<WeftBarrier*>::const_iterator it = 
+          participants.begin(); it != participants.end(); it++)
+    {
+      // We can't count arrives as providing a happens-after relationship
+      if ((*it)->is_arrive())
+        continue;
+      earliest_after[(*it)->thread->thread_id] = (*it)->thread_line_number;
+    }
+    // Now check all our earliest before barriers for transitive cases
+    for (std::vector<BarrierInstance*>::const_iterator it = 
+          earliest_outgoing.begin(); it != earliest_outgoing.end(); it++)
+    {
+      (*it)->update_earliest_after(earliest_after);
+    }
+  }
+  // Then update all our dependences
+  notify_dependences<TransitiveTask>(weft, forward);
+}
+
+void BarrierInstance::update_latest_incoming(
+                              std::vector<BarrierInstance*> &other)
+{
+  unsigned idx = 0;
+  for (std::vector<BarrierInstance*>::const_iterator it = 
+        latest_incoming.begin(); it != latest_incoming.end(); it++, idx++)
+  {
+    if ((*it) == NULL)
+      continue;
+    BarrierInstance *bar = other[idx];
+    // If we have no previous barrier or we have a later generation
+    // of the same named barrier then we use that
+    if ((bar == NULL) || ((*it)->generation > bar->generation))
+      other[idx] = (*it);
+  }
+}
+
+void BarrierInstance::update_earliest_outgoing(
+                              std::vector<BarrierInstance*> &other)
+{
+  unsigned idx = 0;
+  for (std::vector<BarrierInstance*>::const_iterator it = 
+        earliest_outgoing.begin(); it != earliest_outgoing.end(); it++, idx++)
+  {
+    if ((*it) == NULL)
+      continue;
+    BarrierInstance *bar = other[idx];
+    if ((bar == NULL) || ((*it)->generation < bar->generation))
+      other[idx] = (*it);
+  }
+}
+
+void BarrierInstance::update_latest_before(std::vector<int> &other)
+{
+  unsigned idx = 0;
+  for (std::vector<int>::const_iterator it = latest_before.begin();
+        it != latest_before.end(); it++, idx++)
+  {
+    if ((*it) == -1)
+      continue;
+    int latest = other[idx];
+    if ((latest == -1) || ((*it) > latest))
+      other[idx] = (*it);
+  }
+}
+
+void BarrierInstance::update_earliest_after(std::vector<int> &other)
+{
+  unsigned idx = 0;
+  for (std::vector<int>::const_iterator it = earliest_after.begin();
+        it != earliest_after.end(); it++, idx++)
+  {
+    if ((*it) == -1)
+      continue;
+    int earliest = other[idx];
+    if ((earliest == -1) || ((*it) < earliest))
+      other[idx] = (*it);
+  }
 }
 
 void BarrierInstance::traverse_forward(std::deque<BarrierInstance*> &queue,
@@ -179,13 +385,13 @@ BarrierDependenceGraph::BarrierDependenceGraph(
 
 BarrierDependenceGraph::~BarrierDependenceGraph(void)
 {
-  for (std::vector<std::deque<BarrierInstance*> >::iterator it = 
-        barrier_instances.begin(); it != barrier_instances.end(); it++)
-  {
-    for (unsigned idx = 0; idx < it->size(); idx++)
-      delete (*it)[idx];
-  }
   barrier_instances.clear();
+  for (std::deque<BarrierInstance*>::iterator it = 
+        all_barriers.begin(); it != all_barriers.end(); it++)
+  {
+    delete (*it);
+  }
+  all_barriers.clear();
   PTHREAD_SAFE_CALL( pthread_mutex_destroy(&validation_mutex) );
 }
 
@@ -232,16 +438,8 @@ void BarrierDependenceGraph::construct_graph(
   else
     fprintf(stdout,"WEFT INFO: NO DEADLOCKS!\n");
   if (weft->print_verbose())
-  {
-    size_t total_instances = 0;
-    for (std::vector<std::deque<BarrierInstance*> >::const_iterator it =
-          barrier_instances.begin(); it != barrier_instances.end(); it++)
-    {
-      total_instances += it->size();
-    }
     fprintf(stdout,"WEFT INFO: Total barrier instances: %ld\n",
-                    total_instances);
-  }
+            all_barriers.size());
 }
 
 int BarrierDependenceGraph::count_validation_tasks(void)
@@ -293,6 +491,8 @@ void BarrierDependenceGraph::check_for_validation_errors(void)
                            failed_validations.size());
     weft->report_error(WEFT_ERROR_GRAPH_VALIDATION, buffer);
   }
+  else
+    fprintf(stdout,"WEFT INFO: BARRIERS PROPERLY RECYCLED!\n");
 }
 
 void BarrierDependenceGraph::validate_barrier(int name, int generation)
@@ -301,13 +501,61 @@ void BarrierDependenceGraph::validate_barrier(int name, int generation)
   assert(name < barrier_instances.size());
   std::deque<BarrierInstance*> &named_barrier = barrier_instances[name];
   assert((generation+1) < named_barrier.size());
-  BFS bfs(named_barrier[generation], named_barrier[generation+1]);
+  BFSSearch bfs(named_barrier[generation], named_barrier[generation+1]);
   bool found = bfs.execute();
   if (!found)
   {
     PTHREAD_SAFE_CALL( pthread_mutex_lock(&validation_mutex) );
     failed_validations.push_back(std::pair<int,int>(name, generation));
     PTHREAD_SAFE_CALL( pthread_mutex_unlock(&validation_mutex) );
+  }
+}
+
+int BarrierDependenceGraph::count_total_barriers(void)
+{
+  return all_barriers.size();
+}
+
+void BarrierDependenceGraph::enqueue_reachability_tasks(void)
+{
+  // We leverage our knowledge of graph topology to compute
+  // this intelligently. We start off launching tasks only
+  // for barriers with no incoming edges for happens-after and
+  // no outgoing edges for happens-before. Each task execution
+  // then launches any tasks which have had all its dependences
+  // satisfied. This keeps us from having to do a bunch of 
+  // expensive BFS searches over the entire graph.
+
+  // First initialize the pending counts for all barriers
+  // before we start launching any tasks
+  initialize_pending_counts();
+  for (std::deque<BarrierInstance*>::const_iterator it = 
+        all_barriers.begin(); it != all_barriers.end(); it++)
+  {
+    (*it)->launch_if_ready<ReachabilityTask>(weft, true/*forward*/); 
+    (*it)->launch_if_ready<ReachabilityTask>(weft, false/*forward*/);
+  }
+}
+
+void BarrierDependenceGraph::enqueue_transitive_happens_tasks(void)
+{
+  // This operates the same as the reachability tasks to avoid
+  // having to see when all the inputs have been updated.
+  initialize_pending_counts();
+  for (std::deque<BarrierInstance*>::const_iterator it = 
+        all_barriers.begin(); it != all_barriers.end(); it++)
+  {
+    (*it)->launch_if_ready<TransitiveTask>(weft, true/*forward*/); 
+    (*it)->launch_if_ready<TransitiveTask>(weft, false/*forward*/);
+  }
+}
+
+void BarrierDependenceGraph::initialize_pending_counts(void)
+{
+  for (std::deque<BarrierInstance*>::const_iterator it = 
+        all_barriers.begin(); it != all_barriers.end(); it++)
+  {
+    (*it)->initialize_pending_counts();
   }
 }
 
@@ -401,6 +649,7 @@ bool BarrierDependenceGraph::remove_complete_barriers(
       BarrierInstance *bar_inst = 
                         new BarrierInstance(this, name, state.generation);
       barrier_instances[name].push_back(bar_inst);
+      all_barriers.push_back(bar_inst);
       idx = 0;
       for (std::vector<Thread*>::const_iterator it = threads.begin();
             it != threads.end(); it++, idx++)
@@ -553,14 +802,14 @@ void ValidationTask::execute(void)
   graph->validate_barrier(name, generation);
 }
 
-BFS::BFS(BarrierInstance *src, BarrierInstance *tar)
+BFSSearch::BFSSearch(BarrierInstance *src, BarrierInstance *tar)
   : source(src), target(tar)
 {
   queue.push_back(src);
   visited.insert(src);
 }
 
-bool BFS::execute(void)
+bool BFSSearch::execute(void)
 {
   while (!queue.empty())
   {
@@ -575,5 +824,25 @@ bool BFS::execute(void)
     next->traverse_forward(queue, visited);
   }
   return false;
+}
+
+ReachabilityTask::ReachabilityTask(BarrierInstance *inst, Weft *w, bool f)
+  : WeftTask(), instance(inst), weft(w), forward(f)
+{
+}
+
+void ReachabilityTask::execute(void)
+{
+  instance->compute_reachability(weft, forward);
+}
+
+TransitiveTask::TransitiveTask(BarrierInstance *inst, Weft *w, bool f)
+  : WeftTask(), instance(inst), weft(w), forward(f)
+{
+}
+
+void TransitiveTask::execute(void)
+{
+  instance->compute_transitivity(weft, forward);
 }
 

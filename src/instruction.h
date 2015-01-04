@@ -480,9 +480,14 @@ public:
   virtual bool is_read(void) const { return false; }
   virtual SharedRead* as_read(void) { return NULL; }
 public:
+  void initialize_happens(Happens *happens);
+  inline Happens* get_happens(void) const { return happens_relationship; }
+public:
   PTXInstruction *const instruction;
   Thread *const thread;
   const int thread_line_number;
+protected:
+  Happens *happens_relationship;
 };
 
 class WeftBarrier : public WeftInstruction {

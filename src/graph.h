@@ -32,6 +32,18 @@ public:
   void add_incoming(BarrierInstance *other);
   void add_outgoing(BarrierInstance *other);
 public:
+  void initialize_pending_counts(void);
+  template<typename T>
+  void launch_if_ready(Weft *weft, bool forward);
+  template<typename T>
+  void notify_dependences(Weft *weft, bool forward);
+  void compute_reachability(Weft *weft, bool forward);
+  void compute_transitivity(Weft *weft, bool forward);
+  void update_latest_incoming(std::vector<BarrierInstance*> &other);
+  void update_earliest_outgoing(std::vector<BarrierInstance*> &other);
+  void update_latest_before(std::vector<int> &other);
+  void update_earliest_after(std::vector<int> &other);
+public:
   void traverse_forward(std::deque<BarrierInstance*> &queue,
                         std::set<BarrierInstance*> &visited);
 public:
@@ -45,6 +57,17 @@ protected:
 protected:
   std::vector<BarrierInstance*> incoming;
   std::vector<BarrierInstance*> outgoing;
+protected:
+  std::vector<BarrierInstance*> latest_incoming;
+  std::vector<BarrierInstance*> earliest_outgoing;
+protected:
+  std::vector<int> latest_before;
+  std::vector<int> earliest_after;
+protected:
+  int base_incoming;
+  int base_outgoing;
+  int pending_incoming;
+  int pending_outgoing;
 };
 
 class BarrierDependenceGraph {
@@ -87,6 +110,10 @@ public:
   void enqueue_validation_tasks(void);
   void check_for_validation_errors(void);
   void validate_barrier(int name, int generation);
+public:
+  int count_total_barriers(void);
+  void enqueue_reachability_tasks(void);
+  void enqueue_transitive_happens_tasks(void);
 protected:
   bool remove_complete_barriers(std::vector<int> &program_counters,
                                 std::vector<PendingState> &pending_arrives,
@@ -100,23 +127,27 @@ protected:
   void report_state(const std::vector<int> &program_counters,
                     const std::vector<Thread*> &threads,
                     const std::vector<PendingState> &pending_arrives);
+protected:
+  void initialize_pending_counts(void);
 public:
   Weft *const weft;
   const int max_num_barriers;
 protected:
   std::vector<std::deque<BarrierInstance*> > barrier_instances;
+  // A summary of all barriers in one place
+  std::deque<BarrierInstance*>               all_barriers;
 protected:
   pthread_mutex_t validation_mutex;
   std::vector<std::pair<int/*name*/,int/*gen*/> > failed_validations;
 };
 
-class BFS {
+class BFSSearch {
 public:
-  BFS(BarrierInstance *source, BarrierInstance *target);
-  BFS(const BFS &rhs) : source(NULL), target(NULL) { assert(false); }
-  ~BFS(void) { }
+  BFSSearch(BarrierInstance *source, BarrierInstance *target);
+  BFSSearch(const BFSSearch &rhs) : source(NULL), target(NULL) { assert(false); }
+  ~BFSSearch(void) { }
 public:
-  BFS& operator=(const BFS &rhs) { assert(false); return *this; }
+  BFSSearch& operator=(const BFSSearch &rhs) { assert(false); return *this; }
 public:
   bool execute(void);
 public:

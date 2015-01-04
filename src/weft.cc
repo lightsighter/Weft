@@ -238,6 +238,32 @@ void Weft::compute_happens_relationships(void)
   if (instrument)
     start_instrumentation(3/*stage*/);
 
+  // First initialization all the data structures
+  initialize_count(threads.size());
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+    enqueue_task(new InitializationTask(*it, threads.size(), max_num_barriers));
+  wait_until_done();
+
+  // Compute barrier reachability
+  int total_barriers = graph->count_total_barriers();
+  initialize_count(2*total_barriers);
+  graph->enqueue_reachability_tasks();
+  wait_until_done();
+
+  // Compute latest/earliest happens-before/after tasks
+  // There are twice as many of these as barriers
+  initialize_count(2*total_barriers);
+  graph->enqueue_transitive_happens_tasks();
+  wait_until_done();
+
+  // Finally update all the happens relationships
+  initialize_count(threads.size());
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+    enqueue_task(new UpdateThreadTask(*it));
+  wait_until_done();
+
   if (instrument)
     stop_instrumentation(3/*stage*/);
 }
@@ -424,16 +450,6 @@ void Weft::report_instrumentation(void)
   }
   fprintf(stdout,"  %50s: %10.3lf ms %12ld KB\n",
           "Total", double(total_time) * 1e-3, total_memory / 1024);
-}
-
-EmulateTask::EmulateTask(Thread *t)
-  : WeftTask(), thread(t)
-{
-}
-
-void EmulateTask::execute(void)
-{
-  thread->emulate();
 }
 
 int main(int argc, char **argv)

@@ -1,5 +1,6 @@
 
 #include "weft.h"
+#include "race.h"
 #include "program.h"
 #include "instruction.h"
 
@@ -207,6 +208,12 @@ Thread::~Thread(void)
     delete (*it);
   }
   instructions.clear();
+  for (std::deque<Happens*>::iterator it = 
+        all_happens.begin(); it != all_happens.end(); it++)
+  {
+    delete (*it);
+  }
+  all_happens.clear();
 }
 
 void Thread::emulate(void)
@@ -316,5 +323,126 @@ int Thread::accumulate_instruction_counts(std::vector<int> &total_counts)
     total += dynamic_counts[idx];
   }
   return total;
+}
+
+void Thread::initialize_happens(int total_threads,
+                                int max_num_barriers)
+{
+  initialize_happens_instances(total_threads); 
+  compute_barriers_before(max_num_barriers);
+  compute_barriers_after(max_num_barriers);
+}
+
+void Thread::update_happens_relationships(void)
+{
+
+}
+
+void Thread::initialize_happens_instances(int total_threads)
+{
+  // First create
+  Happens *next = NULL;  
+  for (std::vector<WeftInstruction*>::const_iterator it = 
+        instructions.begin(); it != instructions.end(); it++)
+  {
+    // If it is a barrier start a new happens
+    bool is_barrier = (*it)->is_barrier();
+    if (is_barrier)
+      next = NULL;
+    if (next == NULL)
+    {
+      next = new Happens(total_threads);
+      all_happens.push_back(next);
+    }
+    (*it)->initialize_happens(next);
+    // If it is a barrier set it to NULL
+    // so that each barrier has its own happens
+    if (is_barrier)
+      next = NULL;
+  }
+}
+
+void Thread::compute_barriers_before(int max_num_barriers)
+{
+  std::vector<WeftBarrier*> before_barriers(max_num_barriers, NULL);
+  bool has_update = false;
+  for (std::vector<WeftInstruction*>::const_iterator it = 
+        instructions.begin(); it != instructions.end(); it++)
+  {
+    // We only count syncs in the set of barriers before
+    // because they are the only instructions which can 
+    // establish a happens-before relationship. On the
+    // contrary, arrives can always establish a happens-after.
+    if ((*it)->is_sync())
+    {
+      WeftBarrier *bar = (*it)->as_barrier(); 
+      assert(bar->name < max_num_barriers);
+      before_barriers[bar->name] = bar;
+      has_update = true;
+    }
+    else if ((*it)->is_arrive())
+      has_update = true; // set to true to update next happens
+    else if (has_update)
+    {
+      Happens *happens = (*it)->get_happens();
+      assert(happens != NULL);
+      happens->update_barriers_before(before_barriers);
+      has_update = false;
+    }
+  }
+}
+
+void Thread::compute_barriers_after(int max_num_barriers)
+{
+  std::vector<WeftBarrier*> after_barriers(max_num_barriers, NULL);
+  bool has_update = false;
+  for (std::vector<WeftInstruction*>::reverse_iterator it = 
+        instructions.rbegin(); it != instructions.rend(); it++)
+  {
+    if ((*it)->is_barrier())
+    {
+      WeftBarrier *bar = (*it)->as_barrier();
+      assert(bar->name < max_num_barriers);
+      after_barriers[bar->name] = bar;
+      has_update = true;
+    }
+    else if (has_update)
+    {
+      Happens *happens = (*it)->get_happens();
+      assert(happens != NULL);
+      happens->update_barriers_after(after_barriers);
+      has_update = false;
+    }
+  }
+}
+
+EmulateTask::EmulateTask(Thread *t)
+  : WeftTask(), thread(t)
+{
+}
+
+void EmulateTask::execute(void)
+{
+  thread->emulate();
+}
+
+InitializationTask::InitializationTask(Thread *t, int total, int max_barriers)
+  : WeftTask(), thread(t), total_threads(total), max_num_barriers(max_barriers)
+{
+}
+
+void InitializationTask::execute(void)
+{
+  thread->initialize_happens(total_threads, max_num_barriers);
+}
+
+UpdateThreadTask::UpdateThreadTask(Thread *t)
+  : WeftTask(), thread(t)
+{
+}
+
+void UpdateThreadTask::execute(void)
+{
+  thread->update_happens_relationships();
 }
 
