@@ -96,14 +96,39 @@ void BarrierInstance::add_participant(WeftBarrier *participant, bool sync)
   participant->set_instance(this);
 }
 
+bool BarrierInstance::has_next(BarrierInstance *other)
+{
+  BarrierInstance *local = outgoing[other->name];
+  if (local == NULL)
+    return false;
+  if (local->generation < other->generation)
+    return true;
+  return false;
+}
+
+bool BarrierInstance::has_previous(BarrierInstance *other)
+{
+  BarrierInstance *local = incoming[other->name];
+  if (local == NULL)
+    return false;
+  if (local->generation > other->generation)
+    return true;
+  return false;
+}
+
 void BarrierInstance::add_incoming(BarrierInstance *other)
 {
   assert(other != NULL);
-  assert(generation > 0);
   BarrierInstance *&current = incoming[other->name];
   // Keep the latest one before the barrier
-  if ((current == NULL) || (other->generation > current->generation))
+  if (current == NULL)
     current = other;
+  else if (other->generation > current->generation)
+  {
+    // Remove ourselves from its outgoing list
+    current->remove_outgoing(name, generation);
+    current = other;
+  }
 }
 
 void BarrierInstance::add_outgoing(BarrierInstance *other)
@@ -111,8 +136,28 @@ void BarrierInstance::add_outgoing(BarrierInstance *other)
   assert(other != NULL);
   BarrierInstance *&current = outgoing[other->name];
   // Keep the earliest after the barrier
-  if ((current == NULL) || (other->generation < current->generation))
+  if (current == NULL)
     current = other;
+  else if (other->generation < current->generation)
+  {
+    // Remove ourselves from the its incoming list
+    current->remove_incoming(name, generation);
+    current = other;
+  }
+}
+
+void BarrierInstance::remove_incoming(int other_name, int gen)
+{
+  assert(incoming[other_name] != NULL);
+  if (incoming[other_name]->generation == gen)
+    incoming[other_name] = NULL;
+}
+
+void BarrierInstance::remove_outgoing(int other_name, int gen)
+{
+  assert(outgoing[other_name] != NULL);
+  if (outgoing[other_name]->generation == gen)
+    outgoing[other_name] = NULL;
 }
 
 void BarrierInstance::initialize_pending_counts(void)
@@ -138,6 +183,28 @@ void BarrierInstance::initialize_pending_counts(void)
         base_outgoing++;
     }
   }
+#if 0
+  printf(" Barrier %d Generation %d\n", name, generation);
+  printf("   Incoming:");
+  for (std::vector<BarrierInstance*>::const_iterator it = 
+        incoming.begin(); it != incoming.end(); it++)
+  {
+    if ((*it) == NULL)
+      continue;
+    printf(" (%d,%d)", (*it)->name, (*it)->generation);
+  }
+  printf("\n");
+  printf("   Outgoing:");
+  for (std::vector<BarrierInstance*>::const_iterator it = 
+        outgoing.begin(); it != outgoing.end(); it++)
+  {
+    if ((*it) == NULL)
+      continue;
+    printf(" (%d,%d)", (*it)->name, (*it)->generation);
+  }
+  printf("\n");
+  fflush(stdout);
+#endif
   // +1 because we do an initial check
   pending_incoming = base_incoming + 1;
   pending_outgoing = base_outgoing + 1;
@@ -187,6 +254,11 @@ void BarrierInstance::notify_dependences(Weft *weft, bool forward)
 
 void BarrierInstance::compute_reachability(Weft *weft, bool forward)
 {
+#if 0
+  printf("%s reachability for (%d,%d)\n",
+          (forward ? "Forward" : "Backward"), name, generation);
+  fflush(stdout);
+#endif
   // Do the computation
   if (forward)
   {
@@ -351,8 +423,16 @@ void BarrierDependenceGraph::PreceedingBarriers::find_preceeding(
       // See if they intersect on any threads
       if (next->happens_after(*it))
       {
-        (*it)->add_outgoing(next);
-        next->add_incoming(*it);
+        // Check to make sure we can add this edge for
+        // both of them. If they already have an 
+        // earlier/later version of the same physical
+        // barrier then there is no need to add the edge.
+        if (!(*it)->has_next(next) &&
+            !next->has_previous(*it))
+        {
+          (*it)->add_outgoing(next);
+          next->add_incoming(*it);
+        }
         // We found one so we are done
         return;
       }

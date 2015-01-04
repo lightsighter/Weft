@@ -29,8 +29,12 @@ public:
   bool happens_before(const std::vector<WeftBarrier*> &other_participants);
 public:
   void add_participant(WeftBarrier *participant, bool sync);
+  bool has_next(BarrierInstance *other);
+  bool has_previous(BarrierInstance *other);
   void add_incoming(BarrierInstance *other);
   void add_outgoing(BarrierInstance *other);
+  void remove_incoming(int name, int gen);
+  void remove_outgoing(int name, int gen);
 public:
   void initialize_pending_counts(void);
   template<typename T>

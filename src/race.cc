@@ -28,11 +28,15 @@ void Happens::update_happens_relationships(void)
   for (std::vector<WeftBarrier*>::const_iterator it = 
         latest_before.begin(); it != latest_before.end(); it++)
   {
+    if ((*it) == NULL)
+      continue;
     (*it)->get_instance()->update_latest_before(happens_before);
   }
   for (std::vector<WeftBarrier*>::const_iterator it = 
         earliest_after.begin(); it != earliest_after.end(); it++)
   {
+    if ((*it) == NULL)
+      continue;
     (*it)->get_instance()->update_earliest_after(happens_after);
   }
 }
