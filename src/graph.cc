@@ -93,6 +93,7 @@ void BarrierInstance::add_participant(WeftBarrier *participant, bool sync)
     assert(syncs_only.find(participant->thread) == syncs_only.end());
     syncs_only[participant->thread] = participant;
   }
+  participant->set_instance(this);
 }
 
 void BarrierInstance::add_incoming(BarrierInstance *other)

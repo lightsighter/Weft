@@ -1357,8 +1357,16 @@ void WeftInstruction::initialize_happens(Happens *happens)
 }
 
 WeftBarrier::WeftBarrier(int n, int c, PTXBarrier *bar, Thread *thread)
-  : WeftInstruction(bar, thread), name(n), count(c), barrier(bar)
+  : WeftInstruction(bar, thread), name(n), count(c), 
+    barrier(bar), instance(NULL)
 {
+}
+
+void WeftBarrier::set_instance(BarrierInstance *inst)
+{
+  assert(instance == NULL);
+  assert(inst != NULL);
+  instance = inst;
 }
 
 BarrierSync::BarrierSync(int n, int c, PTXBarrier *bar, Thread *thread)

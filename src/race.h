@@ -17,6 +17,8 @@ public:
 public:
   void update_barriers_before(const std::vector<WeftBarrier*> &before);
   void update_barriers_after(const std::vector<WeftBarrier*> &after);
+public:
+  void update_happens_relationships(void);
 protected:
   bool initialized;
   std::vector<WeftBarrier*> latest_before;

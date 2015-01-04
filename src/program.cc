@@ -335,7 +335,11 @@ void Thread::initialize_happens(int total_threads,
 
 void Thread::update_happens_relationships(void)
 {
-
+  for (std::deque<Happens*>::const_iterator it = 
+        all_happens.begin(); it != all_happens.end(); it++)
+  {
+    (*it)->update_happens_relationships();
+  }
 }
 
 void Thread::initialize_happens_instances(int total_threads)
@@ -345,20 +349,18 @@ void Thread::initialize_happens_instances(int total_threads)
   for (std::vector<WeftInstruction*>::const_iterator it = 
         instructions.begin(); it != instructions.end(); it++)
   {
-    // If it is a barrier start a new happens
-    bool is_barrier = (*it)->is_barrier();
-    if (is_barrier)
+    // Don't make happens for barriers
+    if ((*it)->is_barrier())
+    {
       next = NULL;
+      continue;
+    }
     if (next == NULL)
     {
       next = new Happens(total_threads);
       all_happens.push_back(next);
     }
     (*it)->initialize_happens(next);
-    // If it is a barrier set it to NULL
-    // so that each barrier has its own happens
-    if (is_barrier)
-      next = NULL;
   }
 }
 

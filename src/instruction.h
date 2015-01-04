@@ -58,6 +58,7 @@ class BarrierSync;
 class BarrierArrive;
 class SharedWrite;
 class SharedRead;
+class BarrierInstance;
 
 class PTXInstruction {
 public:
@@ -502,9 +503,14 @@ public:
   virtual bool is_barrier(void) const { return true; }
   virtual WeftBarrier* as_barrier(void) { return this; }
 public:
+  void set_instance(BarrierInstance *instance);
+  inline BarrierInstance* get_instance(void) const { return instance; }
+public:
   const int name;
   const int count;
   PTXBarrier *const barrier;
+protected:
+  BarrierInstance *instance;
 };
 
 class BarrierSync : public WeftBarrier {
