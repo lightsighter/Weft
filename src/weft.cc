@@ -111,6 +111,8 @@ void Weft::parse_inputs(int argc, char **argv)
     if (!strcmp(argv[i],"-n"))
     {
       max_num_threads = atoi(argv[++i]);
+      if (max_num_threads < 1)
+        max_num_threads = -1;
       continue;
     }
     if (!strcmp(argv[i],"-s"))
@@ -121,6 +123,8 @@ void Weft::parse_inputs(int argc, char **argv)
     if (!strcmp(argv[i],"-t"))
     {
       thread_pool_size = atoi(argv[++i]);
+      if (thread_pool_size < 1)
+        thread_pool_size = 1;
       continue;
     }
     if (!strcmp(argv[i],"-v"))
