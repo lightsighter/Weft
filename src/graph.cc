@@ -524,15 +524,15 @@ void BarrierDependenceGraph::construct_graph(
     if (weft->print_verbose())
     {
       report_state(program_counters, threads, pending_arrives);
-      weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED "
+      weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED! "
                       "(thread and barrier state reported above)");
     }
     else
-      weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED "
+      weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED! "
           "(run in verbose mode to see thread and barrier state)");
   }
   else
-    fprintf(stdout,"WEFT INFO: NO DEADLOCKS!\n");
+    fprintf(stdout,"WEFT INFO: No deadlocks detected!\n");
   if (weft->print_verbose())
     fprintf(stdout,"WEFT INFO: Total barrier instances: %ld\n",
             all_barriers.size());
@@ -574,6 +574,7 @@ void BarrierDependenceGraph::check_for_validation_errors(void)
   // threadpool when we invokee this method
   if (!failed_validations.empty())
   {
+    fprintf(stderr, "WEFT INFO: BARRIERS NOT PROPERLY RECYCLED!\n");
     for (std::vector<std::pair<int,int> >::const_iterator it = 
           failed_validations.begin(); it != failed_validations.end(); it++)
     {
@@ -588,7 +589,7 @@ void BarrierDependenceGraph::check_for_validation_errors(void)
     weft->report_error(WEFT_ERROR_GRAPH_VALIDATION, buffer);
   }
   else
-    fprintf(stdout,"WEFT INFO: BARRIERS PROPERLY RECYCLED!\n");
+    fprintf(stdout,"WEFT INFO: Barriers properly recycled!\n");
 }
 
 void BarrierDependenceGraph::validate_barrier(int name, int generation)

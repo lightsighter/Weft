@@ -67,13 +67,25 @@ void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
     bool start_recording = false;
     bool found = false;
     std::string line;
-    int line_num = 0;
+    int line_num = 1;
     while (std::getline(file, line))
     {
       if (start_recording)
         lines.push_back(std::pair<std::string,int>(line,line_num));
       if (line.find(".entry") != std::string::npos)
+      {
+        // We should only have one entry kernel, we don't know
+        // how to do this for more than one kernel at the moment
+        if (start_recording)
+        {
+          char buffer[1024];
+          snprintf(buffer, 1023, "Found multiple entry kernels in file %s. "
+                                 "Weft currently only supports one kernel "
+                                 "per file.", file_name);
+          weft->report_error(WEFT_ERROR_MULTIPLE_KERNELS, buffer);
+        }
         start_recording = true;
+      }
       if (!found && (line.find(".maxntid") != std::string::npos))
       {
         int temp = atoi(line.substr(line.find(" "),line.find(",")).c_str());
@@ -148,8 +160,9 @@ void Program::report_statistics(const std::vector<Thread*> &threads)
   fprintf(stdout,"\n");
 }
 
-void Program::emulate(Thread *thread)
+int Program::emulate(Thread *thread)
 {
+  int dynamic_instructions = 0;
   PTXInstruction *pc = ptx_instructions.front();
   bool profile = weft->print_verbose();
   if (profile)
@@ -158,13 +171,18 @@ void Program::emulate(Thread *thread)
     {
       thread->profile_instruction(pc);
       pc = pc->emulate(thread);
+      dynamic_instructions++;
     }
   }
   else
   {
     while (pc != NULL)
+    {
       pc = pc->emulate(thread);
+      dynamic_instructions++;
+    }
   }
+  return dynamic_instructions;
 }
 
 void Program::convert_to_instructions(int max_num_threads,
@@ -209,7 +227,8 @@ void Program::convert_to_instructions(int max_num_threads,
 }
 
 Thread::Thread(unsigned tid, Program *p, SharedMemory *m)
-  : thread_id(tid), program(p), shared_memory(m), max_barrier_name(-1)
+  : thread_id(tid), program(p), shared_memory(m), 
+    max_barrier_name(-1), dynamic_instructions(0)
 {
   dynamic_counts.resize(PTX_LAST, 0);
 }
@@ -238,7 +257,7 @@ void Thread::emulate(void)
   register_store[WEFT_TID_REG] = thread_id;
   // Use 0 as the default CTA ID
   register_store[WEFT_CTA_REG] = 0; 
-  program->emulate(this);
+  dynamic_instructions = program->emulate(this);
   // Once we are done we can clean up all our data structures
   shared_locations.clear();
   register_store.clear();

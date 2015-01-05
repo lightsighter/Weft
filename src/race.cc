@@ -17,6 +17,7 @@
 #include "weft.h"
 #include "race.h"
 #include "graph.h"
+#include "program.h"
 #include "instruction.h"
 
 Happens::Happens(int total_threads)
@@ -45,19 +46,28 @@ void Happens::update_happens_relationships(void)
   {
     if ((*it) == NULL)
       continue;
-    (*it)->get_instance()->update_latest_before(happens_before);
+    (*it)->get_instance()->update_latest_before(happens_after);
   }
   for (std::vector<WeftBarrier*>::const_iterator it = 
         earliest_after.begin(); it != earliest_after.end(); it++)
   {
     if ((*it) == NULL)
       continue;
-    (*it)->get_instance()->update_earliest_after(happens_after);
+    (*it)->get_instance()->update_earliest_after(happens_before);
   }
 }
 
-Address::Address(const int addr)
-  : address(addr)
+bool Happens::has_happens(int thread, int line_number)
+{
+  if (happens_before[thread] <= line_number)
+    return true;
+  if (happens_after[thread] >= line_number)
+    return true;
+  return false;
+}
+
+Address::Address(const int addr, SharedMemory *mem)
+  : address(addr), memory(mem), total_races(0)
 {
   PTHREAD_SAFE_CALL( pthread_mutex_init(&address_lock,NULL) );
 }
@@ -76,7 +86,114 @@ void Address::add_access(WeftAccess *access)
 
 void Address::perform_race_tests(void)
 {
+  if (memory->weft->assume_warp_synchronous())
+  {
+    for (unsigned idx1 = 0; idx1 < accesses.size(); idx1++)
+    {
+      WeftAccess *first = accesses[idx1];
+      if (first->is_read())
+      {
+        for (unsigned idx2 = idx1+1; idx2 < accesses.size(); idx2++)
+        {
+          WeftAccess *second = accesses[idx2]; 
+          // Check for both reads
+          if (second->is_read())
+            continue;
+          // Check for warp-synchronous
+          if (first->is_warp_synchronous(second))
+            continue;
+          if (!first->has_happens_relationship(second))
+            record_race(first, second);
+        }
+      }
+      else
+      {
+        for (unsigned idx2 = idx1+1; idx2 < accesses.size(); idx2++)
+        {
+          WeftAccess *second = accesses[idx2];
+          // Check for warp-synchronous
+          if (first->is_warp_synchronous(second))
+            continue;
+          if (!first->has_happens_relationship(second))
+            record_race(first, second);
+        }
+      }
+    }
+  }
+  else
+  {
+    // For every pair of addresses, check to see if we can 
+    // establish a happens before or a happens after relationship
+    for (unsigned idx1 = 0; idx1 < accesses.size(); idx1++)
+    {
+      WeftAccess *first = accesses[idx1];
+      if (first->is_read())
+      {
+        for (unsigned idx2 = idx1+1; idx2 < accesses.size(); idx2++)
+        {
+          WeftAccess *second = accesses[idx2]; 
+          // Check for both reads
+          if (second->is_read())
+            continue;
+          if (!first->has_happens_relationship(second))
+            record_race(first, second);
+        }
+      }
+      else
+      {
+        for (unsigned idx2 = idx1+1; idx2 < accesses.size(); idx2++)
+        {
+          WeftAccess *second = accesses[idx2];
+          if (!first->has_happens_relationship(second))
+            record_race(first, second);
+        }
+      }
+    }
+  }
+}
 
+void Address::record_race(WeftAccess *one, WeftAccess *two)
+{
+#if 0
+  printf("Race between threads %d and %d on instructions "
+         "%d and %d (PTX %d and %d)\n",
+         one->thread->thread_id, two->thread->thread_id,
+         one->thread_line_number, two->thread_line_number,
+         one->instruction->line_number, two->instruction->line_number);
+#endif
+  total_races++;
+  // Save the races based on the PTX instructions
+  int ptx_one = one->instruction->line_number;
+  int ptx_two = two->instruction->line_number;
+  if (ptx_one <= ptx_two)
+    ptx_races.insert(std::pair<int,int>(ptx_one, ptx_two));
+  else
+    ptx_races.insert(std::pair<int,int>(ptx_two, ptx_one));
+}
+
+int Address::report_races(void)
+{
+  if ((total_races > 0) && memory->weft->print_verbose())
+  {
+    fprintf(stderr,"WEFT INFO: Found %d races on adress %d!\n",
+                    total_races, address);
+    for (std::set<std::pair<int,int> >::const_iterator it = 
+          ptx_races.begin(); it != ptx_races.end(); it++)
+    {
+      fprintf(stderr,"WEFT INFO: Race on address %d between "
+                      "PTX instructions on lines %d and %d\n",
+                      address, it->first, it->second);
+    }
+  }
+  return total_races;
+}
+
+size_t Address::count_race_tests(void)
+{
+  size_t num_accesses = accesses.size();
+  // OLA's equality
+  // 1 + 2 + 3 + ... + n-1 = (n-1)*n/2
+  return ((num_accesses * (num_accesses-1))/2);
 }
 
 SharedMemory::SharedMemory(Weft *w)
@@ -105,7 +222,7 @@ void SharedMemory::update_accesses(WeftAccess *access)
     addresses.find(access->address);
   if (finder == addresses.end())
   {
-    address = new Address(access->address);
+    address = new Address(access->address, this);
     addresses[access->address] = address;
   }
   else
@@ -130,7 +247,35 @@ void SharedMemory::enqueue_race_checks(void)
 
 void SharedMemory::check_for_races(void)
 {
+  int total_races = 0;
+  for (std::map<int,Address*>::const_iterator it = 
+        addresses.begin(); it != addresses.end(); it++)
+  {
+    total_races += it->second->report_races();
+  }
+  if (total_races > 0)
+  {
+    fprintf(stderr,"WEFT INFO: RACES DETECTED!\n");
+    if (weft->print_verbose())
+      fprintf(stderr,"WEFT INFO: Found %d total races!\n", total_races);
+    else
+      fprintf(stderr,"WEFT INFO: Found %d total races!\n"
+                     "           Run in verbose mode to see line numbers\n",
+                      total_races);
+  }
+  else
+    fprintf(stdout,"WEFT INFO: No races detected!\n");
+}
 
+size_t SharedMemory::count_race_tests(void)
+{
+  size_t result = 0;
+  for (std::map<int,Address*>::const_iterator it = addresses.begin();
+        it != addresses.end(); it++)
+  {
+    result += it->second->count_race_tests();
+  }
+  return result;
 }
 
 RaceCheckTask::RaceCheckTask(Address *addr)

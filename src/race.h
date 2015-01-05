@@ -18,6 +18,7 @@
 #define __RACE_H__
 
 #include <map>
+#include <set>
 #include <deque>
 #include <vector>
 #include <cassert>
@@ -26,6 +27,7 @@
 class Weft;
 class WeftAccess;
 class WeftBarrier;
+class SharedMemory;
 
 class Happens {
 public:
@@ -39,6 +41,7 @@ public:
   void update_barriers_after(const std::vector<WeftBarrier*> &after);
 public:
   void update_happens_relationships(void);
+  bool has_happens(int thread, int line_number);
 protected:
   bool initialized;
   std::vector<WeftBarrier*> latest_before;
@@ -49,19 +52,27 @@ protected:
 
 class Address {
 public:
-  Address(const int addr);
-  Address(const Address &rhs) : address(0) { assert(false); }
+  Address(const int addr, SharedMemory *memory);
+  Address(const Address &rhs) : address(0), memory(NULL) { assert(false); }
   ~Address(void);
 public:
   Address& operator=(const Address &rhs) { assert(false); return *this; }
 public:
   void add_access(WeftAccess *access);
   void perform_race_tests(void);
+  int report_races(void);
+  size_t count_race_tests(void);
+protected:
+  void record_race(WeftAccess *one, WeftAccess *two);
 public:
   const int address;
+  SharedMemory *const memory;
 protected:
   pthread_mutex_t address_lock;
-  std::deque<WeftAccess*> accesses;
+  std::vector<WeftAccess*> accesses;
+protected:
+  int total_races;
+  std::set<std::pair<int,int> > ptx_races;
 };
 
 class SharedMemory {
@@ -77,12 +88,12 @@ public:
   int count_addresses(void) const;
   void enqueue_race_checks(void);
   void check_for_races(void);
+  size_t count_race_tests(void);
 public:
   Weft *const weft;
 protected:
   pthread_mutex_t memory_lock;
   std::map<int/*address*/,Address*> addresses;
 };
-
 
 #endif // __RACE_H__

@@ -81,6 +81,7 @@ void Weft::verify(void)
   construct_dependence_graph();
   compute_happens_relationships();
   check_for_race_conditions();
+  print_statistics();
 }
 
 void Weft::report_error(int error_code, const char *message)
@@ -315,6 +316,34 @@ void Weft::check_for_race_conditions(void)
     stop_instrumentation(4/*stage*/);
 }
 
+void Weft::print_statistics(void)
+{
+  fprintf(stdout,"WEFT STATISTICS\n");
+  fprintf(stdout,"  CTA Thread Count:          %15d\n", max_num_threads);
+  fprintf(stdout,"  Shared Memory Locations:   %15d\n", 
+                                    shared_memory->count_addresses());
+  fprintf(stdout,"  Physical Named Barriers;   %15d\n", max_num_barriers);
+  fprintf(stdout,"  Dynamic Barrier Instances: %15d\n", 
+                                       graph->count_total_barriers());
+  fprintf(stdout,"  Static Instructions:       %15d\n", 
+                                       program->count_instructions());
+  fprintf(stdout,"  Dynamic Instructions:      %15d\n",
+                                        count_dynamic_instructions());
+  fprintf(stdout,"  Total Race Tests:          %15ld\n",
+                                   shared_memory->count_race_tests());
+}
+
+int Weft::count_dynamic_instructions(void)
+{
+  int result = 0;
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+  {
+    result += (*it)->count_dynamic_instructions();
+  }
+  return result;
+}
+
 void Weft::start_threadpool(void)
 {
   assert(thread_pool_size > 0);
@@ -324,6 +353,7 @@ void Weft::start_threadpool(void)
   PTHREAD_SAFE_CALL( pthread_cond_init(&queue_cond, NULL) );
   assert(worker_threads == NULL);
   worker_threads = (pthread_t*)malloc(thread_pool_size * sizeof(pthread_t));
+  threadpool_finished = false;
   for (int i = 0; i < thread_pool_size; i++)
   {
     PTHREAD_SAFE_CALL( pthread_create(worker_threads+i, NULL, 
@@ -335,6 +365,7 @@ void Weft::stop_threadpool(void)
 {
   // Wake up all the worker threads so that they exit
   PTHREAD_SAFE_CALL( pthread_mutex_lock(&queue_lock) );
+  threadpool_finished = true;
   PTHREAD_SAFE_CALL( pthread_cond_broadcast(&queue_cond) );
   PTHREAD_SAFE_CALL( pthread_mutex_unlock(&queue_lock) );
   for (int i = 0; i < thread_pool_size; i++)
@@ -378,24 +409,27 @@ void Weft::enqueue_task(WeftTask *task)
 WeftTask* Weft::dequeue_task(void)
 {
   WeftTask *result = NULL;
-  PTHREAD_SAFE_CALL( pthread_mutex_lock(&queue_lock) );
-  if (queue.empty()) 
+  bool done = false;
+  while (!done)
   {
-    PTHREAD_SAFE_CALL( pthread_cond_wait(&queue_cond, &queue_lock) );
-    // Check to see if the queue is still empty after waiting
-    // If it is then we know we are done
-    if (!queue.empty())
+    PTHREAD_SAFE_CALL( pthread_mutex_lock(&queue_lock) );
+    if (queue.empty()) 
+    {
+      if (!threadpool_finished)
+      {
+        PTHREAD_SAFE_CALL( pthread_cond_wait(&queue_cond, &queue_lock) );
+      }
+      else
+        done = true;
+    }
+    else
     {
       result = queue.front();
       queue.pop_front();
+      done = true;
     }
+    PTHREAD_SAFE_CALL( pthread_mutex_unlock(&queue_lock) );
   }
-  else
-  {
-    result = queue.front();
-    queue.pop_front();
-  }
-  PTHREAD_SAFE_CALL( pthread_mutex_unlock(&queue_lock) );
   return result;
 }
 
@@ -492,6 +526,8 @@ int main(int argc, char **argv)
 {
   Weft weft(argc, argv);
   weft.verify();
+  fflush(stderr);
+  fflush(stdout);
   return 0;
 }
 

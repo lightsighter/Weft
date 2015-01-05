@@ -32,10 +32,13 @@
     }                                 \
   }
 
+#define WARP_SIZE   32
+
 enum {
   WEFT_SUCCESS,
   WEFT_ERROR_NO_FILE_NAME,
   WEFT_ERROR_FILE_OPEN,
+  WEFT_ERROR_MULTIPLE_KERNELS,
   WEFT_ERROR_THREAD_COUNT_MISMATCH,
   WEFT_ERROR_NO_THREAD_COUNT,
   WEFT_ERROR_ARRIVAL_MISMATCH,
@@ -178,6 +181,7 @@ public:
   inline int thread_count(void) const { return max_num_threads; }
   inline int barrier_upper_bound(void) const { return max_num_barriers; }
   inline bool print_verbose(void) const { return verbose; }
+  inline bool assume_warp_synchronous(void) const { return warp_synchronous; }
 protected:
   void parse_inputs(int argc, char **argv);
   void report_usage(int error, const char *error_str);
@@ -186,6 +190,8 @@ protected:
   void construct_dependence_graph(void);
   void compute_happens_relationships(void);
   void check_for_race_conditions(void);
+  void print_statistics(void);
+  int count_dynamic_instructions(void);
 protected:
   void start_threadpool(void);
   void stop_threadpool(void);
@@ -220,6 +226,7 @@ protected:
   BarrierDependenceGraph *graph;
 protected:
   pthread_t *worker_threads;
+  bool threadpool_finished;
 protected:
   pthread_mutex_t count_lock;
   pthread_cond_t count_cond;

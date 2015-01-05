@@ -41,8 +41,9 @@ public:
   void parse_ptx_file(const char *file_name, int &max_num_threads);
   void report_statistics(void);
   void report_statistics(const std::vector<Thread*> &threads);
+  inline int count_instructions(void) const { return ptx_instructions.size(); }
 public:
-  void emulate(Thread *thread);
+  int emulate(Thread *thread);
 protected:
   void convert_to_instructions(int max_num_threads,
           const std::vector<std::pair<std::string,int> > &lines);
@@ -83,7 +84,9 @@ public:
 public:
   inline size_t get_program_size(void) const { return instructions.size(); }
   inline WeftInstruction* get_instruction(int idx)
-  { return ((idx < instructions.size()) ? instructions[idx] : NULL); } 
+    { return ((idx < instructions.size()) ? instructions[idx] : NULL); } 
+  inline int count_dynamic_instructions(void) const 
+    { return dynamic_instructions; }
 public:
   void initialize_happens(int total_threads, int max_num_barriers);
   void update_happens_relationships(void);
@@ -101,6 +104,7 @@ protected:
   std::map<int64_t/*predicate*/,bool/*value*/>    predicate_store;
 protected:
   int max_barrier_name;
+  int dynamic_instructions;
   std::vector<WeftInstruction*>                   instructions;
   std::vector<int>                                dynamic_counts;
 protected:

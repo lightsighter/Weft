@@ -20,8 +20,8 @@ OUTFILE := weft
 all: $(OUTFILE)
 
 GCC = g++
-CC_FLAGS = -ggdb -Wall
-LD_FLAGS = -ggdb -lpthread
+CC_FLAGS = -O2 -Wall
+LD_FLAGS = -O2 -lpthread
 
 FILES = weft.cc \
 	race.cc \

@@ -15,6 +15,7 @@
  */
 
 #include "race.h"
+#include "weft.h"
 #include "program.h"
 #include "instruction.h"
 
@@ -241,6 +242,10 @@ PTXInstruction* PTXInstruction::interpret(const std::string &line, int line_num)
     return result;
   if (PTXOr::interpret(line, line_num, result))
     return result;
+  if (PTXXor::interpret(line, line_num, result))
+    return result;
+  if (PTXNot::interpret(line, line_num, result))
+    return result;
   if (PTXAdd::interpret(line, line_num, result))
     return result;
   if (PTXSub::interpret(line, line_num, result))
@@ -260,6 +265,8 @@ PTXInstruction* PTXInstruction::interpret(const std::string &line, int line_num)
   if (PTXSharedAccess::interpret(line, line_num, result))
     return result;
   if (PTXConvert::interpret(line, line_num, result))
+    return result;
+  if (PTXBitFieldExtract::interpret(line, line_num, result))
     return result;
   return result;
 }
@@ -281,6 +288,10 @@ const char* PTXInstruction::get_kind_name(PTXKind kind)
       return "Logical And";
     case PTX_OR:
       return "Logical Or";
+    case PTX_XOR:
+      return "Logical Xor";
+    case PTX_NOT:
+      return "Logical Not";
     case PTX_ADD:
       return "Integer Add";
     case PTX_SUB:
@@ -289,6 +300,10 @@ const char* PTXInstruction::get_kind_name(PTXKind kind)
       return "Negation";
     case PTX_CONVERT:
       return "Convert";
+    case PTX_CONVERT_ADDRESS:
+      return "Convert Address";
+    case PTX_BFE:
+      return "Bit Field Extract";
     case PTX_MULTIPLY:
       return "Integer Multiply";
     case PTX_MAD:
@@ -380,12 +395,13 @@ PTXInstruction* PTXBranch::emulate(Thread *thread)
   bool value;
   if (!thread->get_pred(predicate, value))
   {
-#if 0
-    char buffer[11];
-    decompress_identifier(predicate, buffer, 11);
-    fprintf(stderr,"WEFT WARNING: Branch depends on undefined predicate %s\n",
-                   buffer);
-#endif
+    if (thread->program->weft->report_warnings())
+    {
+      char buffer[11];
+      decompress_identifier(predicate, buffer, 11);
+      fprintf(stderr,"WEFT WARNING: Branch depends on undefined predicate %s\n",
+                     buffer);
+    }
     return next;
   }
   if (negate)
@@ -648,8 +664,9 @@ bool PTXLeftShift::interpret(const std::string &line, int line_num,
 }
 
 PTXAnd::PTXAnd(int64_t zero, int64_t one, int64_t two, 
-               bool imm, int line_num)
-  : PTXInstruction(PTX_AND, line_num), immediate(imm)
+               bool imm, bool pred, int line_num)
+  : PTXInstruction(PTX_AND, line_num), 
+    immediate(imm), predicate(pred)
 {
   args[0] = zero;
   args[1] = one;
@@ -658,23 +675,47 @@ PTXAnd::PTXAnd(int64_t zero, int64_t one, int64_t two,
 
 PTXInstruction* PTXAnd::emulate(Thread *thread)
 {
-  if (immediate)
+  if (predicate)
   {
-    int64_t source;
-    if (!thread->get_value(args[1], source))
-      return next;
-    int64_t value = source & args[2];
-    thread->set_value(args[0], value);
+    if (immediate)
+    {
+      bool source;
+      if (!thread->get_pred(args[1], source))
+        return next;
+      bool value = source && bool(args[2]);
+      thread->set_pred(args[0], value);
+    }
+    else
+    {
+      int64_t source, other; 
+      if (!thread->get_value(args[1], source))
+        return next;
+      if (!thread->get_value(args[2], other))
+        return next;
+      bool value = source && other;
+      thread->set_pred(args[0], value);
+    }
   }
   else
   {
-    int64_t source, other;
-    if (!thread->get_value(args[1], source))
-      return next;
-    if (!thread->get_value(args[2], other))
-      return next;
-    int64_t value = source & other;
-    thread->set_value(args[0], value);
+    if (immediate)
+    {
+      int64_t source;
+      if (!thread->get_value(args[1], source))
+        return next;
+      int64_t value = source & args[2];
+      thread->set_value(args[0], value);
+    }
+    else
+    {
+      int64_t source, other;
+      if (!thread->get_value(args[1], source))
+        return next;
+      if (!thread->get_value(args[2], other))
+        return next;
+      int64_t value = source & other;
+      thread->set_value(args[0], value);
+    }
   }
   return next;
 }
@@ -695,15 +736,34 @@ bool PTXAnd::interpret(const std::string &line, int line_num,
     const bool immediate = (regs == 2);
     int64_t arg3 = immediate ? parse_immediate(tokens[3])
                              : parse_register(tokens[3]);
-    result = new PTXAnd(arg1, arg2, arg3, immediate, line_num);
+    result = new PTXAnd(arg1, arg2, arg3, immediate, 
+                        false/*pred*/, line_num);
+    return true;
+  }
+  else if (line.find("and.pred") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 4);
+    bool negate;
+    int64_t arg1 = parse_predicate(tokens[1], negate);
+    int64_t arg2 = parse_predicate(tokens[2], negate);
+    const size_t regs = count(line, "%");
+    assert((regs == 2) || (regs == 3));
+    const bool immediate = (regs == 2);
+    int64_t arg3 = immediate ? parse_immediate(tokens[3])
+                             : parse_predicate(tokens[3], negate);
+    result = new PTXAnd(arg1, arg2, arg3, immediate, 
+                        true/*pred*/, line_num);
     return true;
   }
   return false;
 }
 
 PTXOr::PTXOr(int64_t zero, int64_t one, int64_t two, 
-             bool imm, int line_num)
-  : PTXInstruction(PTX_OR, line_num), immediate(imm)
+             bool imm, bool pred, int line_num)
+  : PTXInstruction(PTX_OR, line_num), 
+    immediate(imm), predicate(pred)
 {
   args[0] = zero;
   args[1] = one;
@@ -712,23 +772,47 @@ PTXOr::PTXOr(int64_t zero, int64_t one, int64_t two,
 
 PTXInstruction* PTXOr::emulate(Thread *thread)
 {
-  if (immediate)
+  if (predicate)
   {
-    int64_t source;
-    if (!thread->get_value(args[1], source))
-      return next;
-    int64_t value = source | args[2];
-    thread->set_value(args[0], value);
+    if (immediate)
+    {
+      bool source;
+      if (!thread->get_pred(args[1], source))
+        return next;
+      bool value = source || bool(args[2]);
+      thread->set_pred(args[0], value);
+    }
+    else
+    {
+      bool source, other;
+      if (!thread->get_pred(args[1], source))
+        return next;
+      if (!thread->get_pred(args[2], other))
+        return next;
+      bool value = source || other;
+      thread->set_pred(args[0], value);
+    }
   }
   else
   {
-    int64_t source, other;
-    if (!thread->get_value(args[1], source))
-      return next;
-    if (!thread->get_value(args[2], other))
-      return next;
-    int64_t value = source | other;
-    thread->set_value(args[0], value);
+    if (immediate)
+    {
+      int64_t source;
+      if (!thread->get_value(args[1], source))
+        return next;
+      int64_t value = source | args[2];
+      thread->set_value(args[0], value);
+    }
+    else
+    {
+      int64_t source, other;
+      if (!thread->get_value(args[1], source))
+        return next;
+      if (!thread->get_value(args[2], other))
+        return next;
+      int64_t value = source | other;
+      thread->set_value(args[0], value);
+    }
   }
   return next;
 }
@@ -749,7 +833,179 @@ bool PTXOr::interpret(const std::string &line, int line_num,
     const bool immediate = (regs == 2);
     int64_t arg3 = immediate ? parse_immediate(tokens[3])
                              : parse_register(tokens[3]);
-    result = new PTXOr(arg1, arg2, arg3, immediate, line_num);
+    result = new PTXOr(arg1, arg2, arg3, immediate, 
+                       false/*predi*/, line_num);
+    return true;
+  }
+  else if (line.find("or.pred") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 4);
+    bool negate;
+    int64_t arg1 = parse_predicate(tokens[1], negate);
+    int64_t arg2 = parse_predicate(tokens[2], negate);
+    const size_t regs = count(line, "%");
+    assert((regs == 2) || (regs == 3));
+    const bool immediate = (regs == 2);
+    int64_t arg3 = immediate ? parse_immediate(tokens[3])
+                             : parse_predicate(tokens[3], negate);
+    result = new PTXOr(arg1, arg2, arg3, immediate, 
+                       true/*predi*/, line_num);
+    return true;
+  }
+  return false;
+}
+
+PTXXor::PTXXor(int64_t zero, int64_t one, int64_t two, 
+             bool imm, bool pred, int line_num)
+  : PTXInstruction(PTX_XOR, line_num), 
+    immediate(imm), predicate(pred)
+{
+  args[0] = zero;
+  args[1] = one;
+  args[2] = two;
+}
+
+PTXInstruction* PTXXor::emulate(Thread *thread)
+{
+  if (predicate)
+  {
+    if (immediate)
+    {
+      bool source;
+      if (!thread->get_pred(args[1], source))
+        return next;
+      bool value = (source && !(bool(args[2]))) ||
+                   (!source && bool(args[2]));;
+      thread->set_pred(args[0], value);
+    }
+    else
+    {
+      bool source, other;
+      if (!thread->get_pred(args[1], source))
+        return next;
+      if (!thread->get_pred(args[2], other))
+        return next;
+      bool value = (source && !other) || (!source && other);
+      thread->set_pred(args[0], value);
+    }
+  }
+  else
+  {
+    if (immediate)
+    {
+      int64_t source;
+      if (!thread->get_value(args[1], source))
+        return next;
+      int64_t value = source ^ args[2];
+      thread->set_value(args[0], value);
+    }
+    else
+    {
+      int64_t source, other;
+      if (!thread->get_value(args[1], source))
+        return next;
+      if (!thread->get_value(args[2], other))
+        return next;
+      int64_t value = source ^ other;
+      thread->set_value(args[0], value);
+    }
+  }
+  return next;
+}
+
+/*static*/
+bool PTXXor::interpret(const std::string &line, int line_num,
+                      PTXInstruction *&result)
+{
+  if (line.find("xor.b") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 4);
+    int64_t arg1 = parse_register(tokens[1]);
+    int64_t arg2 = parse_register(tokens[2]);
+    const size_t regs = count(line, "%");
+    assert((regs == 2) || (regs == 3));
+    const bool immediate = (regs == 2);
+    int64_t arg3 = immediate ? parse_immediate(tokens[3])
+                             : parse_register(tokens[3]);
+    result = new PTXXor(arg1, arg2, arg3, immediate, 
+                       false/*predi*/, line_num);
+    return true;
+  }
+  else if (line.find("xor.pred") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 4);
+    bool negate;
+    int64_t arg1 = parse_predicate(tokens[1], negate);
+    int64_t arg2 = parse_predicate(tokens[2], negate);
+    const size_t regs = count(line, "%");
+    assert((regs == 2) || (regs == 3));
+    const bool immediate = (regs == 2);
+    int64_t arg3 = immediate ? parse_immediate(tokens[3])
+                             : parse_predicate(tokens[3], negate);
+    result = new PTXXor(arg1, arg2, arg3, immediate, 
+                       true/*predi*/, line_num);
+    return true;
+  }
+  return false;
+}
+
+PTXNot::PTXNot(int64_t zero, int64_t one, bool pred, int line_num)
+  : PTXInstruction(PTX_NOT, line_num), predicate(pred)
+{
+  args[0] = zero;
+  args[1] = one;
+}
+
+PTXInstruction* PTXNot::emulate(Thread *thread)
+{
+  if (predicate)
+  {
+    bool source;
+    if (!thread->get_pred(args[1], source))
+      return next;
+    bool value = !source;
+    thread->set_pred(args[0], value);
+  }
+  else
+  {
+    int64_t source;
+    if (!thread->get_value(args[1], source))
+      return next;
+    int64_t value = !source;
+    thread->set_value(args[0], value);
+  }
+  return next;
+}
+
+/*static*/
+bool PTXNot::interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result)
+{
+  if (line.find("not.b") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 3);
+    int64_t arg1 = parse_register(tokens[1]);
+    int64_t arg2 = parse_register(tokens[2]);
+    result = new PTXNot(arg1, arg2, false/*pred*/, line_num);
+    return true;
+  }
+  else if (line.find("not.pred") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 3);
+    bool negate;
+    int64_t arg1 = parse_predicate(tokens[1], negate);
+    int64_t arg2 = parse_predicate(tokens[2], negate);
+    result = new PTXNot(arg1, arg2, true/*pred*/, line_num);
     return true;
   }
   return false;
@@ -1359,6 +1615,59 @@ bool PTXConvertAddress::interpret(const std::string &line, int line_num,
   return false;
 }
 
+PTXBitFieldExtract::PTXBitFieldExtract(int64_t a[4], bool imm[4], int line_num)
+  : PTXInstruction(PTX_BFE, line_num)
+{
+  for (int i = 0; i < 4; i++)
+    args[i] = a[i];
+  for (int i = 0; i < 4; i++)
+    immediate[i] = imm[i];
+}
+
+PTXInstruction* PTXBitFieldExtract::emulate(Thread *thread)
+{
+  int64_t vals[3];
+  for (int i = 0; i < 3; i++)
+  {
+    if (immediate[i+1])
+      vals[i] = args[i+1];
+    else if (!thread->get_value(args[i+1], vals[i]))
+      return next;
+  }
+  int index = vals[1] & 0xff;
+  int length = vals[2] & 0xff;
+  int64_t mask = 0;
+  for (int i = index; i < (index+length); i++)
+    mask |= (1 << i);
+  int64_t value = (vals[0] & mask) >> index;
+  thread->set_value(args[0], value);
+  return next;
+}
+
+/*static*/
+bool PTXBitFieldExtract::interpret(const std::string &line, int line_num,
+                                   PTXInstruction *&result)
+{
+  if (line.find("bfe.") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 5);
+    int64_t args[4];
+    bool immediate[4];
+    for (int i = 0; i < 4; i++)
+    {
+      const bool imm = (tokens[i+1].find("%") == std::string::npos);
+      immediate[i] = imm;
+      args[i] = imm ? parse_immediate(tokens[i+1])
+                    : parse_register(tokens[i+1]);
+    }
+    result = new PTXBitFieldExtract(args, immediate, line_num);
+    return true;
+  }
+  return false;
+}
+
 WeftInstruction::WeftInstruction(PTXInstruction *inst, Thread *t)
   : instruction(inst), thread(t), thread_line_number(t->get_program_size()),
     happens_relationship(NULL)
@@ -1398,6 +1707,35 @@ BarrierArrive::BarrierArrive(int n, int c, PTXBarrier *bar, Thread *thread)
 WeftAccess::WeftAccess(int addr, PTXSharedAccess *acc, Thread *thread)
   : WeftInstruction(acc, thread), address(addr), access(acc)
 {
+}
+
+bool WeftAccess::has_happens_relationship(WeftAccess *other)
+{
+  // If they are the same thread, then we are done
+  if (thread == other->thread)
+    return true;
+  assert(happens_relationship != NULL);
+  int thread_id = other->thread->thread_id;
+  int line_number = other->thread_line_number;
+  return happens_relationship->has_happens(thread_id, line_number);
+}
+
+bool WeftAccess::is_warp_synchronous(WeftAccess *other)
+{
+  // Check to see if the threads are in the same warp
+  int local_wid = thread->thread_id/WARP_SIZE;
+  int other_wid = other->thread->thread_id/WARP_SIZE;
+  if (local_wid != other_wid)
+    return false;
+  // If they are in the same warp, see if they
+  // are different instructions
+  if (instruction != other->instruction)
+    return true;
+  // They could be different instances of the same instruction
+  // Even though it is not precise, we'll assume that the 
+  // thread line numbers need to be the same
+  // TODO: be more precise about warp-synchronous execution
+  return (thread_line_number != other->thread_line_number);
 }
 
 SharedWrite::SharedWrite(int addr, PTXSharedAccess *acc, Thread *thread)
