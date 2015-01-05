@@ -20,13 +20,40 @@ three important properties of any warp-specialized kernel.
  * Race Freedom - checking that all shared memory accesses are properly
                   synchronized by named barriers.
 
+Weft performs a fully static analysis which requires that the use of 
+named barriers and shared memory accesses be statically analyzable.
+All operations which are not statically analyzable are ignored and 
+can optionally be reported. In practice, we have found that For most 
+GPU kernels this is not an issue because synchronization and shared 
+memory accesses are not dependent on program input and therefore
+can be verified statically.
+
 Due to its generality, Weft is also capable of checking non-warp-specialized
 code as well for race freedom. The one caveat is that Weft currently
 does not attempt to check code that uses atomics.
 
 To use Weft, request that the CUDA compiler generate PTX for a kernel
 using the <em>--ptx</em> flag. The output PTX file can then be passed
-directly to Weft. Weft assumes that there is only one kernel per file.
-If Weft discovers any loops which it cannot statically bound, then it
-unrolls them four times. The expected number of unroll times can be
-set using the <em>--loop</em> flag.
+directly to Weft. Weft currently assumes that there is only one kernel 
+per file.
+
+The examples directory contains several CUDA kernels and Makefiles for
+generating the associated PTX code.
+
+Below is a summary of the command line flags that Weft accepts.
+
+ * <em>-f</em>: specify the input PTX file (can be omitted if 
+                the file is the last argument in the command line)
+ * <em>-i</em>: instrument the execution of Weft to report the
+                time taken and memory usage for each stage
+ * <em>-n</em>: set the number of threads per CTA. This is required
+                if the CUDA kernel did not have a 
+                <em>__launch_bounds__</em> annotation
+ * <em>-s</em>: assume warp-synchronous exeuction when checking for races
+ * <em>-t</em>: set the size of the thread pool for Weft to use. In
+                general, Weft is memory bound, so one thread per socket
+                should be sufficient for achieving peak performance.
+ * <em>-v</em>: enable verbose output
+ * <em>-w</em>: enable warnings about PTX instructions that cannot be
+                statically emulated (can result in large output)
+
