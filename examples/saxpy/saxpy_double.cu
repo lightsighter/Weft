@@ -23,7 +23,9 @@
 /*
  * This version of saxpy uses cudaDMA for DMAs with manual double buffering.
  */
-__global__ void saxpy_cudaDMA_doublebuffer ( float* y, float* x, float a, clock_t * timer_vals) 
+__global__ void 
+__launch_bounds__(384,2)
+saxpy_cudaDMA_doublebuffer ( float* y, float* x, float a, clock_t * timer_vals) 
 {
   __shared__ float sdata_x0 [COMPUTE_THREADS_PER_CTA];
   __shared__ float sdata_x1 [COMPUTE_THREADS_PER_CTA];
