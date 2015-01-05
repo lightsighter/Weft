@@ -48,7 +48,7 @@ Below is a summary of the command line flags that Weft accepts.
                 time taken and memory usage for each stage
  * <em>-n</em>: set the number of threads per CTA. This is required
                 if the CUDA kernel did not have a 
-                <em>__launch_bounds__</em> annotation
+                <em>\_\_launch_bounds\_\_</em> annotation
  * <em>-s</em>: assume warp-synchronous exeuction when checking for races
  * <em>-t</em>: set the size of the thread pool for Weft to use. In
                 general, Weft is memory bound, so one thread per socket
