@@ -154,13 +154,12 @@ void Address::perform_race_tests(void)
 
 void Address::record_race(WeftAccess *one, WeftAccess *two)
 {
-#if 0
-  printf("Race between threads %d and %d on instructions "
-         "%d and %d (PTX %d and %d)\n",
-         one->thread->thread_id, two->thread->thread_id,
-         one->thread_line_number, two->thread_line_number,
-         one->instruction->line_number, two->instruction->line_number);
-#endif
+  // Alternative race reporting
+  //printf("Race between threads %d and %d on instructions "
+  //       "%d and %d (PTX %d and %d)\n",
+  //       one->thread->thread_id, two->thread->thread_id,
+  //       one->thread_line_number, two->thread_line_number,
+  //       one->instruction->line_number, two->instruction->line_number);
   total_races++;
   // Save the races based on the PTX instructions
   int ptx_one = one->instruction->line_number;

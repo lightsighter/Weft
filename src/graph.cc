@@ -198,28 +198,6 @@ void BarrierInstance::initialize_pending_counts(void)
         base_outgoing++;
     }
   }
-#if 0
-  printf(" Barrier %d Generation %d\n", name, generation);
-  printf("   Incoming:");
-  for (std::vector<BarrierInstance*>::const_iterator it = 
-        incoming.begin(); it != incoming.end(); it++)
-  {
-    if ((*it) == NULL)
-      continue;
-    printf(" (%d,%d)", (*it)->name, (*it)->generation);
-  }
-  printf("\n");
-  printf("   Outgoing:");
-  for (std::vector<BarrierInstance*>::const_iterator it = 
-        outgoing.begin(); it != outgoing.end(); it++)
-  {
-    if ((*it) == NULL)
-      continue;
-    printf(" (%d,%d)", (*it)->name, (*it)->generation);
-  }
-  printf("\n");
-  fflush(stdout);
-#endif
   // +1 because we do an initial check
   pending_incoming = base_incoming + 1;
   pending_outgoing = base_outgoing + 1;
@@ -269,11 +247,6 @@ void BarrierInstance::notify_dependences(Weft *weft, bool forward)
 
 void BarrierInstance::compute_reachability(Weft *weft, bool forward)
 {
-#if 0
-  printf("%s reachability for (%d,%d)\n",
-          (forward ? "Forward" : "Backward"), name, generation);
-  fflush(stdout);
-#endif
   // Do the computation
   if (forward)
   {
