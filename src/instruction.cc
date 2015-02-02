@@ -110,7 +110,7 @@ inline int64_t compress_identifier(const char *buffer, size_t buffer_size)
   // encode more than 10 of them in a 64 bit integer
   assert(buffer_size <= 10);
   uint64_t result = 0;
-  for (int i = 0; i < buffer_size; i++)
+  for (unsigned i = 0; i < buffer_size; i++)
   {
     uint64_t next = convert_identifier(buffer[i]);
     result |= (next << (i*6));

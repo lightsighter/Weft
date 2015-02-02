@@ -17,10 +17,12 @@
 #ifndef __PROGRAM_H__
 #define __PROGRAM_H__
 
+#include <string>
 #include <map>
 #include <deque>
 #include <vector>
 #include <cassert>
+#include <stdint.h>
 
 class Weft;
 class Thread;
@@ -84,7 +86,7 @@ public:
 public:
   inline size_t get_program_size(void) const { return instructions.size(); }
   inline WeftInstruction* get_instruction(int idx)
-    { return ((idx < instructions.size()) ? instructions[idx] : NULL); } 
+    { return ((unsigned(idx) < instructions.size()) ? instructions[idx] : NULL); } 
   inline int count_dynamic_instructions(void) const 
     { return dynamic_instructions; }
 public:

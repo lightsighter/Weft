@@ -568,9 +568,9 @@ void BarrierDependenceGraph::check_for_validation_errors(void)
 void BarrierDependenceGraph::validate_barrier(int name, int generation)
 {
   // Do a breadth-first search to get from generation to generation+1
-  assert(name < barrier_instances.size());
+  assert(unsigned(name) < barrier_instances.size());
   std::deque<BarrierInstance*> &named_barrier = barrier_instances[name];
-  assert((generation+1) < named_barrier.size());
+  assert(unsigned(generation+1) < named_barrier.size());
   BFSSearch bfs(named_barrier[generation], named_barrier[generation+1]);
   bool found = bfs.execute();
   if (!found)
@@ -640,7 +640,7 @@ bool BarrierDependenceGraph::remove_complete_barriers(
   std::vector<int> barrier_participants(max_num_barriers, -1);
   std::vector<bool> all_arrives(max_num_barriers, true);
   // Initialize the pending state for all barriers
-  for (unsigned name = 0; name < max_num_barriers; name++)
+  for (int name = 0; name < max_num_barriers; name++)
   {
     PendingState &state = pending_arrives[name];
     if (state.expected <= 0)
@@ -650,7 +650,7 @@ bool BarrierDependenceGraph::remove_complete_barriers(
   }
   // Scan across all the threads and see if we can find any complete
   // barriers, if so pop them off the stack and advance program counters
-  unsigned idx = 0;
+  int idx = 0;
   for (std::vector<Thread*>::const_iterator it = threads.begin();
         it != threads.end(); it++, idx++)
   {
@@ -690,7 +690,7 @@ bool BarrierDependenceGraph::remove_complete_barriers(
     }
   }
   // Now let's see which barriers are complete
-  for (unsigned name = 0; name < max_num_barriers; name++)
+  for (int name = 0; name < max_num_barriers; name++)
   {
     if (barrier_expected[name] == -1)
       continue;
@@ -765,8 +765,8 @@ bool BarrierDependenceGraph::are_empty(const std::vector<int> &program_counters,
   for (unsigned idx = 0; idx < threads.size(); idx++)
   {
     size_t size = threads[idx]->get_program_size();
-    assert(program_counters[idx] <= size);
-    if (program_counters[idx] < size)
+    assert(unsigned(program_counters[idx]) <= size);
+    if (unsigned(program_counters[idx]) < size)
       return false;
   }
   return true;
@@ -782,7 +782,7 @@ bool BarrierDependenceGraph::advance_program_counters(
   for (std::vector<Thread*>::const_iterator it = threads.begin();
         it != threads.end(); it++, idx++)
   {
-    if (program_counters[idx] == (*it)->get_program_size())
+    if (unsigned(program_counters[idx]) == (*it)->get_program_size())
       continue;
     WeftInstruction *inst = (*it)->get_instruction(program_counters[idx]);
     while (!inst->is_barrier() || inst->is_arrive())
@@ -805,7 +805,7 @@ bool BarrierDependenceGraph::advance_program_counters(
           weft->report_error(WEFT_ERROR_ARRIVAL_MISMATCH, buffer);
         }
         state.arrivals.insert(arrive);
-        if (state.expected == state.arrivals.size())
+        if (unsigned(state.expected) == state.arrivals.size())
         {
           char buffer[1024];
           snprintf(buffer, 1023, "All arrivals on barrier %d possible",

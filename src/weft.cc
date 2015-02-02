@@ -163,7 +163,7 @@ void Weft::parse_inputs(int argc, char **argv)
 
 void Weft::report_usage(int error, const char *error_str)
 {
-  fprintf(stderr,"WEFT ERROR %d: %s\n! WEFT WILL NOW EXIT...\n", 
+  fprintf(stderr,"WEFT ERROR %d: %s!\nWEFT WILL NOW EXIT...\n", 
           error, error_str);
   fprintf(stderr,"Usage: Weft [args]\n");
   fprintf(stderr,"  -f: specify the input file\n");
@@ -172,7 +172,7 @@ void Weft::report_usage(int error, const char *error_str)
   fprintf(stderr,"  -s: assume warp-synchronous execution\n");
   fprintf(stderr,"  -t: thread pool size\n");
   fprintf(stderr,"  -v: print verbose output\n");
-  fprintf(stderr,"  -w: report emulation warnings\n");
+  fprintf(stderr,"  -w: report emulation warnings (will generate large output)\n");
   exit(error);
 }
 
@@ -274,7 +274,7 @@ void Weft::compute_happens_relationships(void)
   if (instrument)
     start_instrumentation(3/*stage*/);
 
-  // First initialization all the data structures
+  // First initialize all the data structures
   initialize_count(threads.size());
   for (std::vector<Thread*>::const_iterator it = threads.begin();
         it != threads.end(); it++)
@@ -282,13 +282,14 @@ void Weft::compute_happens_relationships(void)
   wait_until_done();
 
   // Compute barrier reachability
+  // There are twice as many tasks as barriers
   int total_barriers = graph->count_total_barriers();
   initialize_count(2*total_barriers);
   graph->enqueue_reachability_tasks();
   wait_until_done();
 
   // Compute latest/earliest happens-before/after tasks
-  // There are twice as many of these as barriers
+  // There are twice as many tasks as barriers
   initialize_count(2*total_barriers);
   graph->enqueue_transitive_happens_tasks();
   wait_until_done();
