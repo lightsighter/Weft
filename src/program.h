@@ -96,8 +96,8 @@ public:
   bool find_shared_location(const std::string &name, int64_t &addr);
 public:
   void register_global_location(const char *name, const int *data, size_t size);
-  int64_t find_global_location(const char *name, bool &valid);
-  int64_t find_global_value(int64_t addr, bool &valid);
+  bool get_global_location(const char *name, int64_t &addr);
+  bool get_global_value(int64_t addr, int64_t &value);
 public:
   void set_value(int64_t reg, int64_t value);
   bool get_value(int64_t reg, int64_t &value);

@@ -358,34 +358,31 @@ void Thread::register_global_location(const char *name, const int *data, size_t 
   globals.push_back(info);
 }
 
-int64_t Thread::find_global_location(const char *name, bool &valid)
+bool Thread::get_global_location(const char *name, int64_t &value)
 {
   for (unsigned idx = 0; idx < globals.size(); idx++)
   {
     // See if the names match
     if (strcmp(name, globals[idx].name) == 0)
     {
-      valid = true;
-      return (idx*SDDRINC);
+      value = idx * SDDRINC;
+      return true;
     }
   }
-  valid = false;
-  return (-1 * SDDRINC);
+  return false;
 }
 
-int64_t Thread::find_global_value(int64_t addr, bool &valid)
+bool Thread::get_global_value(int64_t addr, int64_t &value)
 {
   int index = addr / SDDRINC;
   if ((index >= 0) && (index < globals.size()))
   {
-    valid = true;
     size_t offset = addr - (index * SDDRINC);
     assert(offset < globals[index].size);
-    valid = true;
-    return globals[index].data[offset];
+    value = globals[index].data[offset];
+    return true;
   }
-  valid = false;
-  return 0;
+  return false;
 }
 
 void Thread::set_value(int64_t reg, int64_t value)

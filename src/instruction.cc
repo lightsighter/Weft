@@ -1792,9 +1792,8 @@ PTXInstruction* PTXConvertAddress::emulate(Thread *thread)
   }
   else
   {
-    bool valid;
-    int64_t value = thread->find_global_location(name.c_str(), valid);
-    if (valid)
+    int64_t value;
+    if (thread->get_global_location(name.c_str(), value))
       thread->set_value(dst, value);
   }
   return next;
@@ -2201,9 +2200,8 @@ PTXGlobalLoad::PTXGlobalLoad(int64_t d, int64_t a, int line_num)
 
 PTXInstruction* PTXGlobalLoad::emulate(Thread *thread)
 {
-  bool valid;
-  int64_t value = thread->find_global_value(addr, valid);
-  if (valid)
+  int64_t value;
+  if (thread->get_global_value(addr, value))
     thread->set_value(dst, value);
   return next;
 }
