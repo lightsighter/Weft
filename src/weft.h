@@ -62,17 +62,31 @@ public:
   virtual void execute(void) = 0;
 };
 
-class EmulateTask : public WeftTask {
+class EmulateThread : public WeftTask {
 public:
-  EmulateTask(Thread *thread);
-  EmulateTask(const EmulateTask &rhs) : thread(NULL) { assert(false); }
-  virtual ~EmulateTask(void) { }
+  EmulateThread(Thread *thread);
+  EmulateThread(const EmulateThread &rhs) : thread(NULL) { assert(false); }
+  virtual ~EmulateThread(void) { }
 public:
-  EmulateTask& operator=(const EmulateTask &rhs) { assert(false); return *this; }
+  EmulateThread& operator=(const EmulateThread &rhs) { assert(false); return *this; }
 public:
   virtual void execute(void);
 public:
   Thread *const thread;
+};
+
+class EmulateWarp : public WeftTask {
+public:
+  EmulateWarp(Program *p, Thread **start);
+  EmulateWarp(const EmulateWarp &rhs) : program(NULL), threads(NULL) { assert(false); }
+  virtual ~EmulateWarp(void) { }
+public:
+  EmulateWarp& operator=(const EmulateWarp &rhs) { assert(false); return *this; }
+public:
+  virtual void execute(void);
+public:
+  Program *const program;
+  Thread **const threads;
 };
 
 class ValidationTask : public WeftTask {

@@ -43,9 +43,11 @@ public:
   void parse_ptx_file(const char *file_name, int &max_num_threads);
   void report_statistics(void);
   void report_statistics(const std::vector<Thread*> &threads);
+  bool has_shuffles(void) const;
   inline int count_instructions(void) const { return ptx_instructions.size(); }
 public:
   int emulate(Thread *thread);
+  void emulate_warp(Thread **threads);
 protected:
   void convert_to_instructions(int max_num_threads,
           const std::vector<std::pair<std::string,int> > &lines);
@@ -64,7 +66,9 @@ public:
 public:
   Thread& operator=(const Thread &rhs) { assert(false); return *this; }
 public:
+  void initialize(void);
   void emulate(void);
+  void cleanup(void);
 public:
   void register_shared_location(const std::string &name, int64_t address);
   bool find_shared_location(const std::string &name, int64_t &addr);
@@ -89,6 +93,7 @@ public:
     { return ((unsigned(idx) < instructions.size()) ? instructions[idx] : NULL); } 
   inline int count_dynamic_instructions(void) const 
     { return dynamic_instructions; }
+  inline void set_dynamic_instructions(int count) { dynamic_instructions = count; }
 public:
   void initialize_happens(int total_threads, int max_num_barriers);
   void update_happens_relationships(void);

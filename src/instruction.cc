@@ -215,6 +215,20 @@ PTXInstruction::~PTXInstruction(void)
 {
 }
 
+PTXInstruction* PTXInstruction::emulate_warp(Thread **threads,
+                                             bool *enabled_mask)
+{
+  // For most instructions, we can just call
+  // emulate on individual threads that are enabled.
+  // Instructions which are different can override this behavior.
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    if (enabled_mask[i])
+      emulate(threads[i]);
+  }
+  return next;
+}
+
 void PTXInstruction::set_next(PTXInstruction *n)
 {
   assert(n != NULL);
@@ -267,6 +281,8 @@ PTXInstruction* PTXInstruction::interpret(const std::string &line, int line_num)
   if (PTXConvert::interpret(line, line_num, result))
     return result;
   if (PTXBitFieldExtract::interpret(line, line_num, result))
+    return result;
+  if (PTXShuffle::interpret(line, line_num, result))
     return result;
   return result;
 }
@@ -408,6 +424,14 @@ PTXInstruction* PTXBranch::emulate(Thread *thread)
     value = !value;
   if (value)
     return target;
+  return next;
+}
+
+PTXInstruction* PTXBranch::emulate_warp(Thread **threads,
+                                        bool *enabled_mask)
+{
+  // TODO: Implement this
+  assert(false);
   return next;
 }
 
@@ -1462,6 +1486,14 @@ PTXInstruction* PTXBarrier::emulate(Thread *thread)
   return next;
 }
 
+PTXInstruction* PTXBarrier::emulate_warp(Thread **threads,
+                                         bool *enabled_mask)
+{
+  // TODO: Implement this
+  assert(false);
+  return next;
+}
+
 void PTXBarrier::update_count(unsigned arrival_count)
 {
   // If we didn't have a count before, set it to the full CTA width
@@ -1530,6 +1562,14 @@ PTXInstruction* PTXSharedAccess::emulate(Thread *thread)
     instruction = new SharedRead(address, this, thread);
   thread->add_instruction(instruction);
   thread->update_shared_memory(instruction);
+  return next;
+}
+
+PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
+                                              bool *enabled_mask)
+{
+  // TODO: Implement this
+  assert(false);
   return next;
 }
 
@@ -1663,6 +1703,54 @@ bool PTXBitFieldExtract::interpret(const std::string &line, int line_num,
                     : parse_register(tokens[i+1]);
     }
     result = new PTXBitFieldExtract(args, immediate, line_num);
+    return true;
+  }
+  return false;
+}
+
+PTXShuffle::PTXShuffle(int64_t a[4], bool imm[4], int line_num)
+  : PTXInstruction(PTX_SHFL, line_num)
+{
+  for (int i = 0; i < 4; i++)
+    args[i] = a[i];
+  for (int i = 0; i < 4; i++)
+    immediate[i] = imm[i];
+}
+
+PTXInstruction* PTXShuffle::emulate(Thread *thread)
+{
+  // This should never be called in single thread mode
+  assert(false);
+  return next;
+}
+
+PTXInstruction* PTXShuffle::emulate_warp(Thread **threads,
+                                         bool *enabled_mask)
+{
+  // TODO: implement this
+  assert(false);
+  return next;
+}
+
+/*static*/
+bool PTXShuffle::interpret(const std::string &line, int line_num,
+                           PTXInstruction *&result)
+{
+  if (line.find("shfl.") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 5);
+    int64_t args[4];
+    bool immediate[4];
+    for (int i = 0; i < 4; i++)
+    {
+      const bool imm = (tokens[i+1].find("%") == std::string::npos);
+      immediate[i] = imm;
+      args[i] = imm ? parse_immediate(tokens[i+1])
+                    : parse_register(tokens[i+1]);
+    }
+    result = new PTXShuffle(args, immediate, line_num);
     return true;
   }
   return false;

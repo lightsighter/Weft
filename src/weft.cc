@@ -194,6 +194,15 @@ void Weft::parse_ptx(void)
                    "line using the '-n' flag", file_name);
     report_error(WEFT_ERROR_NO_THREAD_COUNT, buffer);
   }
+  // Check for shuffles, if we have shuffles then make sure
+  // that we have enabled warp-synchronous execution
+  if (!warp_synchronous && program->has_shuffles())
+  {
+    fprintf(stdout,"WEFT WARNING: Program has shuffle instructions "
+                   "but warp-synchronous execution was not assumed!\n"
+                   "Enabling warp-synchronous assumption...\n");
+    warp_synchronous = true;
+  }
   if (instrument)
     stop_instrumentation(0/*stage*/);
   if (verbose)
@@ -212,12 +221,29 @@ void Weft::emulate_threads(void)
   shared_memory = new SharedMemory(this);
   assert(max_num_threads > 0);
   threads.resize(max_num_threads, NULL);
-  initialize_count(max_num_threads);
-  for (int i = 0; i < max_num_threads; i++)
+  // If we are doing warp synchronous execution we 
+  // execute all the threads in a warp together
+  if (warp_synchronous) 
   {
-    threads[i] = new Thread(i, program, shared_memory); 
-    EmulateTask *task = new EmulateTask(threads[i]);
-    enqueue_task(task);
+    assert((max_num_threads % WARP_SIZE) == 0);
+    initialize_count(max_num_threads/WARP_SIZE);
+    for (int i = 0; i < max_num_threads; i+= WARP_SIZE)
+    {
+      for (int j = 0; j < WARP_SIZE; j++)
+        threads[i+j] = new Thread(i+j, program, shared_memory);
+      EmulateWarp *task = new EmulateWarp(program, &(threads[i]));
+      enqueue_task(task);
+    }
+  }
+  else
+  {
+    initialize_count(max_num_threads);
+    for (int i = 0; i < max_num_threads; i++)
+    {
+      threads[i] = new Thread(i, program, shared_memory); 
+      EmulateThread *task = new EmulateThread(threads[i]);
+      enqueue_task(task);
+    }
   }
   wait_until_done();
   // Get the maximum barrier ID from all threads

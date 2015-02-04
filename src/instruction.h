@@ -54,6 +54,7 @@ enum PTXKind {
   PTX_LABEL,
   PTX_BRANCH,
   PTX_UNIFORM_BRANCH,
+  PTX_SHFL,
   PTX_LAST, // this one must be last
 };
 
@@ -85,10 +86,15 @@ public:
   virtual~ PTXInstruction(void);
 public:
   virtual PTXInstruction* emulate(Thread *thread) = 0;
+  // Most instructions do the same thing, but some need
+  // to override this behavior so make it virtual
+  virtual PTXInstruction* emulate_warp(Thread **threads,
+                                       bool *enabled_mask);
 public:
   virtual bool is_label(void) const { return false; }
   virtual bool is_branch(void) const { return false; } 
   virtual bool is_barrier(void) const { return false; }
+  virtual bool is_shuffle(void) const { return false; }
 public:
   virtual PTXLabel* as_label(void) { return NULL; }
   virtual PTXBranch* as_branch(void) { return NULL; }
@@ -142,6 +148,9 @@ public:
   PTXBranch& operator=(const PTXBranch &rhs) { assert(false); return *this; }
 public:
   virtual PTXInstruction* emulate(Thread *thread);
+  // Override for warp-synchronous execution!
+  virtual PTXInstruction* emulate_warp(Thread **threads,
+                                       bool *enabled_mask);
 public:
   virtual bool is_branch(void) const { return true; }
 public:
@@ -444,6 +453,9 @@ public:
   PTXBarrier& operator=(const PTXBarrier &rhs) { assert(false); return *this; }
 public:
   virtual PTXInstruction* emulate(Thread *thread);
+  // Override for warp-synchronous execution!
+  virtual PTXInstruction* emulate_warp(Thread **threads,
+                                       bool *enabled_mask);
 public:
   virtual bool is_barrier(void) const { return true; }
   virtual PTXBarrier* as_barrier(void) { return this; }
@@ -468,6 +480,9 @@ public:
     { assert(false); return *this; }
 public:
   virtual PTXInstruction* emulate(Thread *thread);
+  // Override for warp-synchronous execution!
+  virtual PTXInstruction* emulate_warp(Thread **threads,
+                                       bool *enabled_mask);
 protected:
   int64_t addr, offset;
   bool write;
@@ -519,6 +534,27 @@ public:
     { assert(false); return *this; }
 public:
   virtual PTXInstruction* emulate(Thread *thread);
+protected:
+  int64_t args[4];
+  bool immediate[4];
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXShuffle : public PTXInstruction {
+public:
+  PTXShuffle(int64_t args[4], bool immediates[4], int line_num);
+  PTXShuffle(const PTXShuffle &rhs) { assert(false); }
+  virtual ~PTXShuffle(void) { }
+public:
+  PTXShuffle& operator=(const PTXShuffle &rhs)
+    { assert(false); return *this; }
+public:
+  virtual PTXInstruction* emulate(Thread *thread);
+  virtual PTXInstruction* emulate_warp(Thread **threads,
+                                       bool *enabled_mask);
+  virtual bool is_shuffle(void) const { return true; }
 protected:
   int64_t args[4];
   bool immediate[4];

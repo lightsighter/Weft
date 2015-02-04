@@ -160,6 +160,17 @@ void Program::report_statistics(const std::vector<Thread*> &threads)
   fprintf(stdout,"\n");
 }
 
+bool Program::has_shuffles(void) const
+{
+  for (std::vector<PTXInstruction*>::const_iterator it = 
+        ptx_instructions.begin(); it != ptx_instructions.end(); it++)
+  {
+    if ((*it)->is_shuffle())
+      return true;
+  }
+  return false;
+}
+
 int Program::emulate(Thread *thread)
 {
   int dynamic_instructions = 0;
@@ -183,6 +194,48 @@ int Program::emulate(Thread *thread)
     }
   }
   return dynamic_instructions;
+}
+
+void Program::emulate_warp(Thread **threads)
+{
+  // Execute all the threads in lock-step
+  PTXInstruction *pc = ptx_instructions.front();  
+  bool enabled_mask[WARP_SIZE];
+  for (int i = 0; i < WARP_SIZE; i++)
+    enabled_mask[i] = true;
+  int dynamic_instructions[WARP_SIZE];
+  for (int i = 0; i < WARP_SIZE; i++)
+    dynamic_instructions[i] = 0;
+  bool profile = weft->print_verbose();
+  if (profile)
+  {
+    while (pc != NULL)
+    {
+      for (int i = 0; i < WARP_SIZE; i++)
+      {
+        if (enabled_mask[i])
+        {
+          threads[i]->profile_instruction(pc);
+          dynamic_instructions[i]++;
+        }
+      }
+      pc = pc->emulate_warp(threads, enabled_mask);
+    }
+  }
+  else
+  {
+    while (pc != NULL)
+    {
+      for (int i = 0; i < WARP_SIZE; i++)
+      {
+        if (enabled_mask[i])
+          dynamic_instructions[i]++;
+      }
+      pc = pc->emulate_warp(threads, enabled_mask);
+    }
+  }
+  for (int i = 0; i < WARP_SIZE; i++)
+    threads[i]->set_dynamic_instructions(dynamic_instructions[i]);
 }
 
 void Program::convert_to_instructions(int max_num_threads,
@@ -250,14 +303,22 @@ Thread::~Thread(void)
   all_happens.clear();
 }
 
-void Thread::emulate(void)
+void Thread::initialize(void)
 {
   // Before starting emulation fill in the special
   // values for particular registers
   register_store[WEFT_TID_REG] = thread_id;
   // Use 0 as the default CTA ID
-  register_store[WEFT_CTA_REG] = 0; 
+  register_store[WEFT_CTA_REG] = 0;
+}
+
+void Thread::emulate(void)
+{
   dynamic_instructions = program->emulate(this);
+}
+
+void Thread::cleanup(void)
+{
   // Once we are done we can clean up all our data structures
   shared_locations.clear();
   register_store.clear();
@@ -457,14 +518,35 @@ void Thread::compute_barriers_after(int max_num_barriers)
   }
 }
 
-EmulateTask::EmulateTask(Thread *t)
+EmulateThread::EmulateThread(Thread *t)
   : WeftTask(), thread(t)
 {
 }
 
-void EmulateTask::execute(void)
+void EmulateThread::execute(void)
 {
+  thread->initialize();
   thread->emulate();
+  thread->cleanup();
+}
+
+EmulateWarp::EmulateWarp(Program *p, Thread **start)
+  : WeftTask(), program(p), threads(start)
+{
+}
+
+void EmulateWarp::execute(void)
+{
+  // Initialize all the threads
+  for (int i = 0; i < WARP_SIZE; i++)
+    threads[i]->initialize();
+
+  // Have the program simulate all the threads together
+  program->emulate_warp(threads);
+
+  // Cleanup all the threads
+  for (int i = 0; i < WARP_SIZE; i++)
+    threads[i]->cleanup();
 }
 
 InitializationTask::InitializationTask(Thread *t, int total, int max_barriers)
