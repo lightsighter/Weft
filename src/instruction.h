@@ -59,6 +59,7 @@ enum PTXKind {
   PTX_SHFL,
   PTX_EXIT,
   PTX_GLOBAL_DECL,
+  PTX_GLOBAL_LOAD,
   PTX_LAST, // this one must be last
 };
 
@@ -518,6 +519,7 @@ public:
 class PTXConvertAddress : public PTXInstruction {
 public:
   PTXConvertAddress(int64_t zero, int64_t one, int line_num);
+  PTXConvertAddress(int64_t zero, const std::string &name, int line_num);
   PTXConvertAddress(const PTXConvertAddress &rhs) { assert(false); }
   virtual ~PTXConvertAddress(void) { }
 public:
@@ -526,7 +528,9 @@ public:
 public:
   virtual PTXInstruction* emulate(Thread *thread);
 protected:
+  bool has_name;
   int64_t src, dst;
+  std::string name;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);
@@ -619,6 +623,23 @@ protected:
   char *name;
   int *values;
   size_t size;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXGlobalLoad : public PTXInstruction {
+public:
+  PTXGlobalLoad(int64_t dst, int64_t addr, int line_num);
+  PTXGlobalLoad(const PTXGlobalLoad &rhs) { assert(false); }
+  virtual ~PTXGlobalLoad(void) { };
+public:
+  PTXGlobalLoad& operator=(const PTXGlobalLoad &rhs)
+    { assert(false); return *this; }
+public:
+  virtual PTXInstruction* emulate(Thread *thread);
+protected:
+  int64_t dst, addr;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);

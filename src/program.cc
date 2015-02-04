@@ -375,7 +375,7 @@ int64_t Thread::find_global_location(const char *name, bool &valid)
 
 int64_t Thread::find_global_value(int64_t addr, bool &valid)
 {
-  unsigned index = addr / SDDRINC;
+  int index = addr / SDDRINC;
   if ((index >= 0) && (index < globals.size()))
   {
     valid = true;

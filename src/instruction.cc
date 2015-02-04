@@ -341,6 +341,14 @@ const char* PTXInstruction::get_kind_name(PTXKind kind)
       return "Branch";
     case PTX_UNIFORM_BRANCH:
       return "Uniform Branch";
+    case PTX_SHFL:
+      return "Shuffle";
+    case PTX_EXIT:
+      return "Exit";
+    case PTX_GLOBAL_DECL:
+      return "Global Memory Declaration";
+    case PTX_GLOBAL_LOAD:
+      return "Global Load";
     default:
       assert(false);
   }
@@ -1762,16 +1770,33 @@ bool PTXConvert::interpret(const std::string &line, int line_num,
 }
 
 PTXConvertAddress::PTXConvertAddress(int64_t zero, int64_t one, int line_num)
-  : PTXInstruction(PTX_CONVERT_ADDRESS, line_num), src(one), dst(zero)
+  : PTXInstruction(PTX_CONVERT_ADDRESS, line_num), 
+    has_name(false), src(one), dst(zero)
+{
+}
+
+PTXConvertAddress::PTXConvertAddress(int64_t zero, const std::string &n, int line_num)
+  : PTXInstruction(PTX_CONVERT_ADDRESS, line_num),
+    has_name(true), dst(zero), name(n)
 {
 }
 
 PTXInstruction* PTXConvertAddress::emulate(Thread *thread)
 {
-  int64_t value;
-  if (!thread->get_value(src, value))
-    return next;
-  thread->set_value(dst, value);
+  if (!has_name)
+  {
+    int64_t value;
+    if (!thread->get_value(src, value))
+      return next;
+    thread->set_value(dst, value);
+  }
+  else
+  {
+    bool valid;
+    int64_t value = thread->find_global_location(name.c_str(), valid);
+    if (valid)
+      thread->set_value(dst, value);
+  }
   return next;
 }
 
@@ -1792,7 +1817,8 @@ bool PTXConvertAddress::interpret(const std::string &line, int line_num,
     }
     else
     {
-
+      std::string name = tokens[2].substr(0, tokens[2].size()-1);
+      result = new PTXConvertAddress(arg1, name, line_num);
     }
     return true;
   }
@@ -2163,6 +2189,37 @@ bool PTXGlobalDecl::interpret(const std::string &line, int line_num,
       values[i] = value;
     }
     result = new PTXGlobalDecl(strdup(name.c_str()), values, size, line_num);
+    return true;
+  }
+  return false;
+}
+
+PTXGlobalLoad::PTXGlobalLoad(int64_t d, int64_t a, int line_num)
+  : PTXInstruction(PTX_GLOBAL_LOAD, line_num), dst(d), addr(a)
+{
+}
+
+PTXInstruction* PTXGlobalLoad::emulate(Thread *thread)
+{
+  bool valid;
+  int64_t value = thread->find_global_value(addr, valid);
+  if (valid)
+    thread->set_value(dst, value);
+  return next;
+}
+
+/*static*/
+bool PTXGlobalLoad::interpret(const std::string &line, int line_num,
+                              PTXInstruction *&result)
+{
+  if (line.find("ld.global") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 3);
+    int arg1 = parse_register(tokens[1]);
+    int arg2 = parse_register(tokens[2]);
+    result = new PTXGlobalLoad(arg1, arg2, line_num);
     return true;
   }
   return false;
