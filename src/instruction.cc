@@ -24,8 +24,6 @@
 #include <cstring>
 #include <cassert>
 
-#define SDDRINC (100000000)
-
 inline size_t count(const std::string &base, const std::string &to_find)
 {
   size_t result = 0;
@@ -216,14 +214,15 @@ PTXInstruction::~PTXInstruction(void)
 }
 
 PTXInstruction* PTXInstruction::emulate_warp(Thread **threads,
-                                             bool *enabled_mask)
+                                             ThreadState *thread_state,
+                                             int &shared_access_id)
 {
   // For most instructions, we can just call
   // emulate on individual threads that are enabled.
   // Instructions which are different can override this behavior.
   for (int i = 0; i < WARP_SIZE; i++)
   {
-    if (enabled_mask[i])
+    if (thread_state[i].status == THREAD_ENABLED)
       emulate(threads[i]);
   }
   return next;
@@ -283,6 +282,10 @@ PTXInstruction* PTXInstruction::interpret(const std::string &line, int line_num)
   if (PTXBitFieldExtract::interpret(line, line_num, result))
     return result;
   if (PTXShuffle::interpret(line, line_num, result))
+    return result;
+  if (PTXExit::interpret(line, line_num, result))
+    return result;
+  if (PTXGlobalDecl::interpret(line, line_num, result))
     return result;
   return result;
 }
@@ -428,10 +431,108 @@ PTXInstruction* PTXBranch::emulate(Thread *thread)
 }
 
 PTXInstruction* PTXBranch::emulate_warp(Thread **threads,
-                                        bool *enabled_mask)
+                                        ThreadState *thread_state,
+                                        int &shared_access_id)
 {
-  // TODO: Implement this
-  assert(false);
+  // Evaluate all the branches for all the enabled threads
+  PTXInstruction *targets[WARP_SIZE];
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    if (thread_state[i].status == THREAD_ENABLED)
+    {
+      if (predicate == 0)
+        targets[i] = target;
+      else
+      {
+        bool value;
+        if (!threads[i]->get_pred(predicate, value))
+        {
+          if (threads[i]->program->weft->report_warnings())
+          {
+            char buffer[11];
+            decompress_identifier(predicate, buffer, 11);
+            fprintf(stderr,"WEFT WARNING: Branch depends on "
+                           "undefined predicate %s\n", buffer);
+          }
+          targets[i] = next;
+        }
+        else
+        {
+          // We successfully got a predicate
+          if (negate)
+            value = !value;
+          if (value)
+            targets[i] = target;
+          else
+            targets[i] = next;
+        }
+      }
+    }
+    else if (thread_state[i].status == THREAD_DISABLED)
+    {
+      targets[i] = thread_state[i].next;
+      assert(targets[i] != NULL);
+    }
+    else
+      targets[i] = NULL; // exitted threads don't matter
+  }
+  // We have all the targets 
+  // See if we have consensus about where to go next 
+  bool converged = true; 
+  PTXInstruction *result = NULL;
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    // Skip any exitted threads
+    if (targets[i] == NULL)
+      continue;
+    // If this is our first non-NULL entry record it
+    if (result == NULL)
+    {
+      result = targets[i];
+      continue;
+    }
+    // If we diverge at some point then we are done
+    if (targets[i] != result)
+    {
+      converged = false;
+      break;
+    }
+  }
+  // If all the threads have exitted we should never be here
+  assert(result != NULL);
+  // If we converged, then we can all go to the same place
+  if (converged)
+  {
+    // Enable all the non-exitted threads and return the result
+    for (int i = 0; i < WARP_SIZE; i++)
+    {
+      if (thread_state[i].status != THREAD_EXITTED)
+      {
+        thread_state[i].status = THREAD_ENABLED;
+        thread_state[i].next = NULL;
+      }
+    }
+    return result;
+  }
+  // If we didn't converge, then we are going to go to next
+  // Recompute the enabled and disabled threads
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    // Skip all the exitted threads
+    if (targets[i] == NULL)
+      continue;
+    // Enable any threads going to next
+    if (targets[i] == next)
+    {
+      thread_state[i].status = THREAD_ENABLED;
+      thread_state[i].next = NULL;
+    }
+    else // Disable all threads not going to next
+    {
+      thread_state[i].status = THREAD_DISABLED;
+      thread_state[i].next = targets[i];
+    }
+  }
   return next;
 }
 
@@ -495,7 +596,7 @@ bool PTXSharedDecl::interpret(const std::string &line, int line_num,
     std::string name = line.substr(start, line.find("[") - start);
     // This is just an approximation to stride all 
     // the shared memory allocations far away from each other
-    int64_t  address = shared_offset * SDDRINC;
+    int64_t address = shared_offset * SDDRINC;
     shared_offset++;
     result = new PTXSharedDecl(name, address, line_num);
     return true;
@@ -1460,7 +1561,6 @@ PTXBarrier::PTXBarrier(int64_t n, int64_t c, bool s,
 
 PTXInstruction* PTXBarrier::emulate(Thread *thread)
 {
-  WeftInstruction *instruction;
   int64_t name_value;
   if (!name_immediate)
   {
@@ -1477,6 +1577,7 @@ PTXInstruction* PTXBarrier::emulate(Thread *thread)
   }
   else
     count_value = count;
+  WeftInstruction *instruction;
   if (sync)
     instruction = new BarrierSync(name_value, count_value, this, thread);
   else
@@ -1487,10 +1588,14 @@ PTXInstruction* PTXBarrier::emulate(Thread *thread)
 }
 
 PTXInstruction* PTXBarrier::emulate_warp(Thread **threads,
-                                         bool *enabled_mask)
+                                         ThreadState *thread_state,
+                                         int &shared_access_id)
 {
-  // TODO: Implement this
-  assert(false);
+  // In warp-synchronous execution, if any thread in a warp arrives
+  // at a barrier, then it is like all of the threads in a warp arrived
+  // regardless of whether the thread is enabled, disabled, or exitted 
+  for (int i = 0; i < WARP_SIZE; i++)
+    emulate(threads[i]);
   return next;
 }
 
@@ -1566,10 +1671,42 @@ PTXInstruction* PTXSharedAccess::emulate(Thread *thread)
 }
 
 PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
-                                              bool *enabled_mask)
+                                              ThreadState *thread_state,
+                                              int &shared_access_id)
 {
-  // TODO: Implement this
-  assert(false);
+  // Shared accesses work mostly the same, but we want to detect
+  // races from threads in the same warp doing accesses at the 
+  // same time to the same instruction, so we record a common identifier
+  if (write)
+  {
+    for (int i = 0; i < WARP_SIZE; i++)
+    {
+      int64_t value;
+      if (!threads[i]->get_value(addr, value))
+        continue;
+      int64_t address = value + offset;
+      WeftAccess *instruction = 
+        new SharedWrite(address, this, threads[i], shared_access_id);
+      threads[i]->add_instruction(instruction);
+      threads[i]->update_shared_memory(instruction);
+    }
+  }
+  else
+  {
+    for (int i = 0; i < WARP_SIZE; i++)
+    {
+      int64_t value;
+      if (!threads[i]->get_value(addr, value))
+        continue;
+      int64_t address = value + offset;
+      WeftAccess *instruction = 
+        new SharedRead(address, this, threads[i], shared_access_id);
+      threads[i]->add_instruction(instruction);
+      threads[i]->update_shared_memory(instruction);
+    }
+  }
+  // Increment the shared_access_id
+  shared_access_id++;
   return next;
 }
 
@@ -1648,8 +1785,15 @@ bool PTXConvertAddress::interpret(const std::string &line, int line_num,
     split(tokens, line.c_str());
     assert(tokens.size() == 3);
     int64_t arg1 = parse_register(tokens[1]);
-    int64_t arg2 = parse_register(tokens[2]);
-    result = new PTXConvertAddress(arg1, arg2, line_num);
+    if (tokens[2].find("%") != std::string::npos)
+    {
+      int64_t arg2 = parse_register(tokens[2]);
+      result = new PTXConvertAddress(arg1, arg2, line_num);
+    }
+    else
+    {
+
+    }
     return true;
   }
   return false;
@@ -1708,8 +1852,8 @@ bool PTXBitFieldExtract::interpret(const std::string &line, int line_num,
   return false;
 }
 
-PTXShuffle::PTXShuffle(int64_t a[4], bool imm[4], int line_num)
-  : PTXInstruction(PTX_SHFL, line_num)
+PTXShuffle::PTXShuffle(ShuffleKind k, int64_t a[4], bool imm[4], int line_num)
+  : PTXInstruction(PTX_SHFL, line_num), kind(k)
 {
   for (int i = 0; i < 4; i++)
     args[i] = a[i];
@@ -1725,10 +1869,96 @@ PTXInstruction* PTXShuffle::emulate(Thread *thread)
 }
 
 PTXInstruction* PTXShuffle::emulate_warp(Thread **threads,
-                                         bool *enabled_mask)
+                                         ThreadState *thread_state,
+                                         int &shared_access_id)
 {
-  // TODO: implement this
-  assert(false);
+  // Compute the inputs from each thread
+  int64_t inputs[WARP_SIZE];
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    if (thread_state[i].status != THREAD_ENABLED)
+    {
+      if (threads[i]->program->weft->report_warnings())
+        fprintf(stderr,"WARNING: Shuffle with masked off thread!\n");
+      inputs[i] = 0;
+      continue;
+    }
+    if (immediate[1])
+      inputs[i] = args[1];
+    else
+    {
+      // Not an immediate, so evaluate it
+      int64_t value;
+      if (!threads[i]->get_value(args[1], value))
+      {
+        if (threads[i]->program->weft->report_warnings())
+          fprintf(stderr,"WARNING: Shuffle depends on undefined value!\n");
+        inputs[i] = 0;
+        continue;
+      }
+      inputs[i] = value;
+    }
+  }
+  // Now that we've got all the inputs, compute the shuffle
+  for (int lane = 0; lane < WARP_SIZE; lane++)
+  {
+    int64_t b, c, dst;
+    if (immediate[2])
+      b = args[2];
+    else if (!threads[lane]->get_value(args[2], b))
+      continue;
+    if (immediate[3])
+      c = args[3];
+    else if (!threads[lane]->get_value(args[3], c))
+      continue;
+    assert(!immediate[0]);
+    if (!threads[lane]->get_value(args[0], dst))
+      continue;
+
+    int bval = b & 0x1f;
+    int mask = (c & 0x1f00) >> 8;
+    int cval = c & 0x1f;
+    int minlane = lane & mask;
+    int maxlane = minlane | (cval & ~mask);
+
+    int src;
+    bool valid;
+    switch (kind)
+    {
+      case SHUFFLE_UP:
+        {
+          src = lane - bval;
+          valid = (src >= maxlane);
+          break;
+        }
+      case SHUFFLE_DOWN:
+        {
+          src = lane + bval;
+          valid = (src <= maxlane);
+          break;
+        }
+      case SHUFFLE_BUTTERFLY:
+        {
+          src = lane ^ bval;
+          valid = (src <= maxlane);
+          break;
+        }
+      case SHUFFLE_IDX:
+        {
+          src = minlane | (bval & ~mask);
+          valid = (src <= maxlane);
+          break;
+        }
+      default:
+        assert(false); // should never get here
+    }
+    int64_t value;
+    if (!valid)
+      value = inputs[lane];
+    else
+      value = inputs[src];
+    threads[lane]->set_value(dst, value);
+  }
   return next;
 }
 
@@ -1738,6 +1968,18 @@ bool PTXShuffle::interpret(const std::string &line, int line_num,
 {
   if (line.find("shfl.") != std::string::npos)
   {
+    ShuffleKind kind;
+    if (line.find(".up") != std::string::npos)
+      kind = SHUFFLE_UP;
+    else if (line.find(".down") != std::string::npos)
+      kind = SHUFFLE_DOWN;
+    else if (line.find(".bfly") != std::string::npos)
+      kind = SHUFFLE_BUTTERFLY;
+    else
+    {
+      assert(line.find(".idx") != std::string::npos);
+      kind = SHUFFLE_IDX;
+    }
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     assert(tokens.size() == 5);
@@ -1750,7 +1992,177 @@ bool PTXShuffle::interpret(const std::string &line, int line_num,
       args[i] = imm ? parse_immediate(tokens[i+1])
                     : parse_register(tokens[i+1]);
     }
-    result = new PTXShuffle(args, immediate, line_num);
+    result = new PTXShuffle(kind, args, immediate, line_num);
+    return true;
+  }
+  return false;
+}
+
+PTXExit::PTXExit(int line_num)
+  : PTXInstruction(PTX_EXIT, line_num), has_predicate(false)
+{
+}
+
+PTXExit::PTXExit(int64_t pred, bool neg, int line_num)
+  : PTXInstruction(PTX_EXIT, line_num), 
+    has_predicate(true), negate(neg), predicate(pred)
+{
+}
+
+PTXInstruction* PTXExit::emulate(Thread *thread)
+{
+  // If we're not predicated, then we are done
+  if (!has_predicate)
+    return NULL;
+  // Otherwise evaluate the predicate
+  bool value;
+  if (!thread->get_pred(predicate, value))
+  {
+    if (thread->program->weft->report_warnings())
+    {
+      char buffer[11];
+      decompress_identifier(predicate, buffer, 11);
+      fprintf(stderr,"WEFT WARNING: Exit depends on undefined "
+                     "predicate %s\n", buffer);
+    }
+    // Assume we don't exit
+    return next;
+  }
+  if (negate)
+    value = !value;
+  if (value)
+    return NULL;
+  return next;
+}
+
+PTXInstruction* PTXExit::emulate_warp(Thread **threads,
+                                      ThreadState *thread_state,
+                                      int &shared_access_id)
+{
+  // Evaluate this for all the enabled threads
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    if (thread_state[i].status == THREAD_ENABLED)
+    {
+      if (!has_predicate)
+      {
+        thread_state[i].status = THREAD_EXITTED;
+        continue;
+      }
+      bool value;
+      if (!threads[i]->get_pred(predicate, value))
+      {
+        if (threads[i]->program->weft->report_warnings())
+        {
+          char buffer[11];
+          decompress_identifier(predicate, buffer, 11);
+          fprintf(stderr,"WEFT WARNING: Exit depends on undefined "
+                         "predicate %s\n", buffer);
+        }
+        // Assume we don't exit
+        continue;
+      }
+      if (negate)
+        value = !value;
+      if (value)
+        thread_state[i].status = THREAD_EXITTED;
+    }
+  }
+  // Check to see if we're all done
+  bool converged = true;
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    if (thread_state[i].status != THREAD_EXITTED)
+    {
+      converged = false;
+      break;
+    }
+  }
+  if (converged)
+    return NULL;
+  return next;
+}
+
+/*static*/
+bool PTXExit::interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result)
+{
+  if (line.find("exit") != std::string::npos)
+  {
+    std::vector<std::string> tokens; 
+    split(tokens, line.c_str());
+    if (tokens.size() == 2)
+    {
+      bool negate;
+      int64_t predicate = parse_predicate(tokens[0], negate);
+      result = new PTXExit(predicate, negate, line_num);
+    }
+    else if(tokens.size() == 1)
+      result = new PTXExit(line_num);
+    else
+      assert(false);
+    return true;
+  }
+  return false;
+}
+
+PTXGlobalDecl::PTXGlobalDecl(char *n, int *v, size_t s, int line_num)
+  : PTXInstruction(PTX_GLOBAL_DECL, line_num), name(n), values(v), size(s)
+{
+}
+
+PTXInstruction* PTXGlobalDecl::emulate(Thread *thread)
+{
+  // Register the name of the memory and it's values with the thread
+  thread->register_global_location(name, values, size);
+  return next;
+}
+
+/*static*/
+bool PTXGlobalDecl::interpret(const std::string &line, int line_num,
+                              PTXInstruction *&result)
+{
+  if ((line.find(".const .align") != std::string::npos) ||
+      (line.find(".global .align") != std::string::npos))
+  {
+    // Assume byte loading
+    int start = line.find(".b8");
+    // Jump to the start of the name
+    int name_start = start + 4;
+    int name_end = line.find("[");
+    std::string name = line.substr(name_start, name_end - name_start);
+    int size_start = name_end+1;
+    int size_end = line.find("]");
+    std::string size_str = line.substr(size_start, size_start - size_end);
+    size_t bytes = atoi(size_str.c_str());
+    assert((bytes % 4) == 0);
+    size_t size = bytes/4;
+    int *values = (int*)malloc(bytes);
+    // Read in the numbers
+    int index = line.find("{");
+    for (unsigned i = 0; i < size; i++)
+    {
+      int value = 0;
+      for (int j = 0; j < 4; j++)
+      {
+        // Read until we get to a number
+        while ((line[index] < '0') ||
+               (line[index] > '9'))
+          index++;
+        // We know these are never longer than 4 bytes;
+        char buffer[4];
+        int local_index = 0;
+        while ((line[index] >= '0') &&
+               (line[index] <= '9'))
+          buffer[local_index++] = line[index++];
+        assert(local_index < 4);
+        buffer[local_index] = '\0';
+        int temp = atoi(buffer);
+        value |= (temp << (j*8));
+      }
+      values[i] = value;
+    }
+    result = new PTXGlobalDecl(strdup(name.c_str()), values, size, line_num);
     return true;
   }
   return false;
@@ -1784,7 +2196,7 @@ void WeftBarrier::set_instance(BarrierInstance *inst)
 
 BarrierSync::BarrierSync(int n, int c, PTXBarrier *bar, Thread *thread)
   : WeftBarrier(n, c, bar, thread)
-{
+{ 
 }
 
 BarrierArrive::BarrierArrive(int n, int c, PTXBarrier *bar, Thread *thread)
@@ -1792,8 +2204,9 @@ BarrierArrive::BarrierArrive(int n, int c, PTXBarrier *bar, Thread *thread)
 {
 }
 
-WeftAccess::WeftAccess(int addr, PTXSharedAccess *acc, Thread *thread)
-  : WeftInstruction(acc, thread), address(addr), access(acc)
+WeftAccess::WeftAccess(int addr, PTXSharedAccess *acc, 
+                       Thread *thread, int acc_id)
+  : WeftInstruction(acc, thread), address(addr), access(acc), access_id(acc_id)
 {
 }
 
@@ -1815,24 +2228,28 @@ bool WeftAccess::is_warp_synchronous(WeftAccess *other)
   int other_wid = other->thread->thread_id/WARP_SIZE;
   if (local_wid != other_wid)
     return false;
-  // If they are in the same warp, see if they
-  // are different instructions
-  if (instruction != other->instruction)
-    return true;
-  // They could be different instances of the same instruction
-  // Even though it is not precise, we'll assume that the 
-  // thread line numbers need to be the same
-  // TODO: be more precise about warp-synchronous execution
-  return (thread_line_number != other->thread_line_number);
+  // We should only be here if we assumed warp synchronous
+  // execution and therefore access IDs are non-negative.
+  assert(access_id >= 0);
+  assert(other->access_id >= 0);
+  // If they are in the same warp, check to see if they have
+  // the same access_id.  If they do, then we cannot use 
+  // warp-synchronous execution to avoid the race test.
+  // If they come from different access IDs then we know
+  // they can't have happened at the same time because
+  // warps execute in lock step.
+  return (access_id != other->access_id);
 }
 
-SharedWrite::SharedWrite(int addr, PTXSharedAccess *acc, Thread *thread)
-  : WeftAccess(addr, acc, thread)
+SharedWrite::SharedWrite(int addr, PTXSharedAccess *acc, 
+                         Thread *thread, int acc_id /*=-1*/)
+  : WeftAccess(addr, acc, thread, acc_id)
 {
 }
 
-SharedRead::SharedRead(int addr, PTXSharedAccess *acc, Thread *thread)
-  : WeftAccess(addr, acc, thread)
+SharedRead::SharedRead(int addr, PTXSharedAccess *acc, 
+                       Thread *thread, int acc_id /*=-1*/)
+  : WeftAccess(addr, acc, thread, acc_id)
 {
 }
 

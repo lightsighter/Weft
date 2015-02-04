@@ -200,12 +200,13 @@ void Program::emulate_warp(Thread **threads)
 {
   // Execute all the threads in lock-step
   PTXInstruction *pc = ptx_instructions.front();  
-  bool enabled_mask[WARP_SIZE];
+  ThreadState thread_state[WARP_SIZE];
   for (int i = 0; i < WARP_SIZE; i++)
-    enabled_mask[i] = true;
+    thread_state[i] = ThreadState();
   int dynamic_instructions[WARP_SIZE];
   for (int i = 0; i < WARP_SIZE; i++)
     dynamic_instructions[i] = 0;
+  int shared_access_id = 0;
   bool profile = weft->print_verbose();
   if (profile)
   {
@@ -213,13 +214,13 @@ void Program::emulate_warp(Thread **threads)
     {
       for (int i = 0; i < WARP_SIZE; i++)
       {
-        if (enabled_mask[i])
+        if (thread_state[i].status == THREAD_ENABLED)
         {
           threads[i]->profile_instruction(pc);
           dynamic_instructions[i]++;
         }
       }
-      pc = pc->emulate_warp(threads, enabled_mask);
+      pc = pc->emulate_warp(threads, thread_state, shared_access_id);
     }
   }
   else
@@ -228,10 +229,10 @@ void Program::emulate_warp(Thread **threads)
     {
       for (int i = 0; i < WARP_SIZE; i++)
       {
-        if (enabled_mask[i])
+        if (thread_state[i].status == THREAD_ENABLED)
           dynamic_instructions[i]++;
       }
-      pc = pc->emulate_warp(threads, enabled_mask);
+      pc = pc->emulate_warp(threads, thread_state, shared_access_id);
     }
   }
   for (int i = 0; i < WARP_SIZE; i++)
@@ -323,6 +324,7 @@ void Thread::cleanup(void)
   shared_locations.clear();
   register_store.clear();
   predicate_store.clear();
+  globals.clear();
 }
 
 void Thread::register_shared_location(const std::string &name, int64_t addr)
@@ -345,6 +347,45 @@ bool Thread::find_shared_location(const std::string &name, int64_t &addr)
   }
   addr = finder->second;
   return true;
+}
+
+void Thread::register_global_location(const char *name, const int *data, size_t size)
+{
+  GlobalDataInfo info;
+  info.name = name;
+  info.data = data;
+  info.size = size;
+  globals.push_back(info);
+}
+
+int64_t Thread::find_global_location(const char *name, bool &valid)
+{
+  for (unsigned idx = 0; idx < globals.size(); idx++)
+  {
+    // See if the names match
+    if (strcmp(name, globals[idx].name) == 0)
+    {
+      valid = true;
+      return (idx*SDDRINC);
+    }
+  }
+  valid = false;
+  return (-1 * SDDRINC);
+}
+
+int64_t Thread::find_global_value(int64_t addr, bool &valid)
+{
+  unsigned index = addr / SDDRINC;
+  if ((index >= 0) && (index < globals.size()))
+  {
+    valid = true;
+    size_t offset = addr - (index * SDDRINC);
+    assert(offset < globals[index].size);
+    valid = true;
+    return globals[index].data[offset];
+  }
+  valid = false;
+  return 0;
 }
 
 void Thread::set_value(int64_t reg, int64_t value)

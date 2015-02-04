@@ -30,6 +30,8 @@
 #define WEFT_TID_REG    (-1)
 #define WEFT_CTA_REG    (-2)
 
+#define SDDRINC (100000000)
+
 enum PTXKind {
   PTX_SHARED_DECL,
   PTX_MOVE,
@@ -55,6 +57,8 @@ enum PTXKind {
   PTX_BRANCH,
   PTX_UNIFORM_BRANCH,
   PTX_SHFL,
+  PTX_EXIT,
+  PTX_GLOBAL_DECL,
   PTX_LAST, // this one must be last
 };
 
@@ -89,7 +93,8 @@ public:
   // Most instructions do the same thing, but some need
   // to override this behavior so make it virtual
   virtual PTXInstruction* emulate_warp(Thread **threads,
-                                       bool *enabled_mask);
+                                       ThreadState *thread_state,
+                                       int &shared_access_id);
 public:
   virtual bool is_label(void) const { return false; }
   virtual bool is_branch(void) const { return false; } 
@@ -150,7 +155,8 @@ public:
   virtual PTXInstruction* emulate(Thread *thread);
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
-                                       bool *enabled_mask);
+                                       ThreadState *thread_state,
+                                       int &shared_access_id);
 public:
   virtual bool is_branch(void) const { return true; }
 public:
@@ -455,7 +461,8 @@ public:
   virtual PTXInstruction* emulate(Thread *thread);
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
-                                       bool *enabled_mask);
+                                       ThreadState *thread_state,
+                                       int &shared_access_id);
 public:
   virtual bool is_barrier(void) const { return true; }
   virtual PTXBarrier* as_barrier(void) { return this; }
@@ -482,7 +489,8 @@ public:
   virtual PTXInstruction* emulate(Thread *thread);
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
-                                       bool *enabled_mask);
+                                       ThreadState *thread_state,
+                                       int &shared_access_id);
 protected:
   int64_t addr, offset;
   bool write;
@@ -544,7 +552,14 @@ public:
 
 class PTXShuffle : public PTXInstruction {
 public:
-  PTXShuffle(int64_t args[4], bool immediates[4], int line_num);
+  enum ShuffleKind {
+    SHUFFLE_UP,
+    SHUFFLE_DOWN,
+    SHUFFLE_BUTTERFLY,
+    SHUFFLE_IDX,
+  };
+public:
+  PTXShuffle(ShuffleKind kind, int64_t args[4], bool immediates[4], int line_num);
   PTXShuffle(const PTXShuffle &rhs) { assert(false); }
   virtual ~PTXShuffle(void) { }
 public:
@@ -552,12 +567,58 @@ public:
     { assert(false); return *this; }
 public:
   virtual PTXInstruction* emulate(Thread *thread);
+  // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
-                                       bool *enabled_mask);
+                                       ThreadState *thread_state,
+                                       int &shared_access_id);
   virtual bool is_shuffle(void) const { return true; }
 protected:
+  ShuffleKind kind;
   int64_t args[4];
   bool immediate[4];
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXExit : public PTXInstruction {
+public:
+  PTXExit(int line_num);
+  PTXExit(int64_t predicate, bool negate, int line_num);
+  PTXExit(const PTXExit &rhs) { assert(false); }
+  virtual ~PTXExit(void) { }
+public:
+  PTXExit& operator=(const PTXExit &rhs)
+    { assert(false); return *this; }
+public:
+  virtual PTXInstruction* emulate(Thread *thread);
+  // Override for warp-synchronous execution!
+  virtual PTXInstruction* emulate_warp(Thread **threads,
+                                       ThreadState *thread_state,
+                                       int &shared_access_id);
+protected:
+  bool has_predicate;
+  bool negate;
+  int64_t predicate;
+public:
+  static bool interpret(const std::string &line, int line_num,
+                        PTXInstruction *&result);
+};
+
+class PTXGlobalDecl : public PTXInstruction {
+public:
+  PTXGlobalDecl(char *name, int *values, size_t size, int line_num);
+  PTXGlobalDecl(const PTXGlobalDecl &rhs) { assert(false); }
+  virtual ~PTXGlobalDecl(void) { free(name); free(values); }
+public:
+  PTXGlobalDecl& operator=(const PTXGlobalDecl &rhs) 
+    { assert(false); return *this; }
+public:
+  virtual PTXInstruction* emulate(Thread *thread);
+protected:
+  char *name;
+  int *values;
+  size_t size;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);
@@ -651,9 +712,9 @@ public:
 
 class WeftAccess : public WeftInstruction {
 public:
-  WeftAccess(int address, PTXSharedAccess *access, Thread *thread);
+  WeftAccess(int address, PTXSharedAccess *access, Thread *thread, int access_id);
   WeftAccess(const WeftAccess &rhs) : WeftInstruction(NULL, NULL),
-    address(0), access(NULL) { assert(false); }
+    address(0), access(NULL), access_id(-1) { assert(false); }
   virtual ~WeftAccess(void) { }
 public:
   WeftAccess& operator=(const WeftAccess &rhs) { assert(false); return *this; }
@@ -666,12 +727,14 @@ public:
 public:
   const int address;
   PTXSharedAccess *const access;
+  const int access_id; // for warp-synchronous execution
 };
 
 class SharedWrite : public WeftAccess {
 public:
-  SharedWrite(int address, PTXSharedAccess *access, Thread *thread);
-  SharedWrite(const SharedWrite &rhs) : WeftAccess(0, NULL, NULL)
+  SharedWrite(int address, PTXSharedAccess *access, 
+              Thread *thread, int access_id = -1);
+  SharedWrite(const SharedWrite &rhs) : WeftAccess(0, NULL, NULL, -1)
     { assert(false); }
   virtual ~SharedWrite(void) { }
 public:
@@ -683,8 +746,9 @@ public:
 
 class SharedRead : public WeftAccess {
 public:
-  SharedRead(int address, PTXSharedAccess *access, Thread *thread);
-  SharedRead(const SharedRead &rhs) : WeftAccess(0, NULL, NULL)
+  SharedRead(int address, PTXSharedAccess *access, 
+             Thread *thread, int access_id = -1);
+  SharedRead(const SharedRead &rhs) : WeftAccess(0, NULL, NULL, -1)
     { assert(false); }
   virtual ~SharedRead(void) { }
 public:

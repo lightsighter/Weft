@@ -24,6 +24,12 @@
 #include <cassert>
 #include <stdint.h>
 
+enum ThreadStatus {
+  THREAD_ENABLED,
+  THREAD_DISABLED,
+  THREAD_EXITTED,
+};
+
 class Weft;
 class Thread;
 class Happens;
@@ -31,6 +37,15 @@ class WeftAccess;
 class SharedMemory;
 class PTXInstruction;
 class WeftInstruction;
+
+struct ThreadState {
+public:
+  ThreadState(void)
+    : status(THREAD_ENABLED), next(NULL) { }
+public:
+  ThreadStatus status;
+  PTXInstruction *next;
+};
 
 class Program {
 public:
@@ -59,6 +74,13 @@ protected:
 
 class Thread {
 public:
+  struct GlobalDataInfo {
+  public:
+    const char *name;
+    const int *data;
+    size_t size;
+  };
+public:
   Thread(unsigned thread_id, Program *p, SharedMemory *s);
   Thread(const Thread &rhs) : thread_id(0), 
     program(NULL), shared_memory(NULL) { assert(false); }
@@ -72,6 +94,10 @@ public:
 public:
   void register_shared_location(const std::string &name, int64_t address);
   bool find_shared_location(const std::string &name, int64_t &addr);
+public:
+  void register_global_location(const char *name, const int *data, size_t size);
+  int64_t find_global_location(const char *name, bool &valid);
+  int64_t find_global_value(int64_t addr, bool &valid);
 public:
   void set_value(int64_t reg, int64_t value);
   bool get_value(int64_t reg, int64_t &value);
@@ -109,6 +135,7 @@ protected:
   std::map<std::string,int64_t/*addr*/>           shared_locations;
   std::map<int64_t/*register*/,int64_t/*value*/>  register_store;
   std::map<int64_t/*predicate*/,bool/*value*/>    predicate_store;
+  std::vector<GlobalDataInfo>                     globals;
 protected:
   int max_barrier_name;
   int dynamic_instructions;
