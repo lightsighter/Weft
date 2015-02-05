@@ -557,12 +557,12 @@ void Weft::report_instrumentation(void)
   {
     double time = double(timing[i]) * 1e-3;
     size_t memory = memory_usage[i] - total_memory;
-    fprintf(stdout,"  %50s: %10.3lf ms %12ld KB\n",
+    fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
             stage_names[i], time, memory / 1024);
     total_time += timing[i];
     total_memory += memory;
   }
-  fprintf(stdout,"  %50s: %10.3lf ms %12ld KB\n",
+  fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
           "Total", double(total_time) * 1e-3, total_memory / 1024);
 }
 
