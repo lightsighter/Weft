@@ -491,6 +491,8 @@ class PTXSharedAccess : public PTXInstruction {
 public:
   PTXSharedAccess(int64_t addr, int64_t offset, bool write, 
                   bool has_arg, int64_t arg, bool immediate, int line_num);
+  PTXSharedAccess(const std::string &name, int64_t offset, bool write,
+                  bool has_arg, int64_t arg, bool immediate, int line_num);
   PTXSharedAccess(const PTXSharedAccess &rhs) { assert(false); }
   virtual ~PTXSharedAccess(void) { }
 public:
@@ -504,6 +506,8 @@ public:
                                        int &shared_access_id,
                                        SharedStore &store);
 protected:
+  bool has_name;
+  std::string name;
   int64_t addr, offset, arg;
   bool write, has_arg, immediate;
 public:

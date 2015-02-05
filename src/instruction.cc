@@ -1694,15 +1694,27 @@ bool PTXBarrier::interpret(const std::string &line, int line_num,
 
 PTXSharedAccess::PTXSharedAccess(int64_t ad, int64_t o, bool w, 
                                  bool has, int64_t ag, bool imm, int line_num)
-  : PTXInstruction(PTX_SHARED_ACCESS, line_num), 
+  : PTXInstruction(PTX_SHARED_ACCESS, line_num), has_name(false),
     addr(ad), offset(o), arg(ag), write(w), has_arg(has), immediate(imm)
+{
+}
+
+PTXSharedAccess::PTXSharedAccess(const std::string &n, int64_t o, bool w,
+                                 bool has, int64_t a, bool imm, int line_num)
+  : PTXInstruction(PTX_SHARED_ACCESS, line_num), has_name(true),
+    name(n), offset(o), arg(a), write(w), has_arg(has), immediate(imm)
 {
 }
 
 PTXInstruction* PTXSharedAccess::emulate(Thread *thread)
 {
   int64_t value;
-  if (!thread->get_value(addr, value))
+  if (has_name)
+  {
+    if (!thread->find_shared_location(name, value))
+      return next;
+  }
+  else if (!thread->get_value(addr, value))
     return next;
   int64_t address = value + offset;
   WeftAccess *instruction;
@@ -1730,7 +1742,12 @@ PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
       if (thread_state[i].status != THREAD_ENABLED)
         continue;
       int64_t addr_value;
-      if (!threads[i]->get_value(addr, addr_value))
+      if (has_name)
+      {
+        if (!threads[i]->find_shared_location(name, addr_value))
+          continue;
+      }
+      else if (!threads[i]->get_value(addr, addr_value))
         continue;
       int64_t address = addr_value + offset;
       WeftAccess *instruction = 
@@ -1757,7 +1774,12 @@ PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
       if (thread_state[i].status != THREAD_ENABLED)
         continue;
       int64_t addr_value;
-      if (!threads[i]->get_value(addr, addr_value))
+      if (has_name)
+      {
+        if (!threads[i]->find_shared_location(name, addr_value))
+          continue;
+      }
+      else if (!threads[i]->get_value(addr, addr_value))
         continue;
       int64_t address = addr_value + offset;
       WeftAccess *instruction = 
@@ -1787,12 +1809,36 @@ bool PTXSharedAccess::interpret(const std::string &line, int line_num,
   {
     
     bool write = (line.find("st.") != std::string::npos);
+    int64_t addr = 0;
     int64_t offset = 0;   
-    int start_reg = line.find("[") + 1;
-    int end_reg = line.find("+")+1;
-    int64_t addr = parse_register(line.substr(start_reg));
-    if (end_reg != (int) std::string::npos)
-      offset = parse_immediate(line.substr(end_reg));
+    std::string name;
+    bool has_name = false;
+    // First check to see if it has an offset
+    if (line.find("+") != std::string::npos)
+    {
+      // Offset
+      int start = line.find("[") + 1;
+      int end = line.find("+");
+      name = line.substr(start, end - start);
+      if (name.find("%") != std::string::npos)
+        addr = parse_register(name);
+      else
+        has_name = true;
+      // Now parse the offset
+      offset = parse_immediate(line.substr(end+1));
+    }
+    else
+    {
+      // No Offset
+      int start = line.find("[") + 1;
+      int end = line.find("]");
+      name = line.substr(start, end - start);
+      if (name.find("%") != std::string::npos)
+        addr = parse_register(name);
+      else
+        has_name = true;
+    }
+    // Now parse the other argument
     std::vector<std::string> tokens;
     split(tokens, line.c_str());
     bool has_arg = false;
@@ -1818,8 +1864,12 @@ bool PTXSharedAccess::interpret(const std::string &line, int line_num,
           arg = parse_register(tokens[1]);
       }
     }
-    result = new PTXSharedAccess(addr, offset, write, has_arg, 
-                                 arg, immediate, line_num);
+    if (has_name)
+      result = new PTXSharedAccess(name, offset, write, has_arg,
+                                   arg, immediate, line_num);
+    else
+      result = new PTXSharedAccess(addr, offset, write, has_arg, 
+                                   arg, immediate, line_num);
     return true;
   }
   return false;
