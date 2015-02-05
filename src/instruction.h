@@ -133,12 +133,17 @@ public:
   PTXLabel& operator=(const PTXLabel &rhs) { assert(false); return *this; }
 public:
   virtual PTXInstruction* emulate(Thread *thread); 
+  // Override for warp-synchronous execution
+  virtual PTXInstruction* emulate_warp(Thread **threads,
+                                       ThreadState *thread_state,
+                                       int &shared_access_id,
+                                       SharedStore &store);
 public:
   virtual bool is_label(void) const { return true; }
 public:
   virtual PTXLabel* as_label(void) { return this; }
 public:
-  void update_labels(std::map<std::string,PTXInstruction*> &labels);
+  void update_labels(std::map<std::string,PTXLabel*> &labels);
 protected:
   std::string label;
 public:
@@ -166,12 +171,12 @@ public:
 public:
   virtual PTXBranch* as_branch(void) { return this; }
 public:
-  void set_targets(const std::map<std::string,PTXInstruction*> &labels);
+  void set_targets(const std::map<std::string,PTXLabel*> &labels);
 protected:
   int64_t predicate;
   bool negate;
   std::string label;
-  PTXInstruction *target;
+  PTXLabel *target;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);
@@ -485,7 +490,7 @@ public:
 class PTXSharedAccess : public PTXInstruction {
 public:
   PTXSharedAccess(int64_t addr, int64_t offset, bool write, 
-                  int64_t arg, bool immediate, int line_num);
+                  bool has_arg, int64_t arg, bool immediate, int line_num);
   PTXSharedAccess(const PTXSharedAccess &rhs) { assert(false); }
   virtual ~PTXSharedAccess(void) { }
 public:
@@ -500,7 +505,7 @@ public:
                                        SharedStore &store);
 protected:
   int64_t addr, offset, arg;
-  bool write, immediate;
+  bool write, has_arg, immediate;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);

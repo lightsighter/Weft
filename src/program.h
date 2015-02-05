@@ -33,6 +33,7 @@ enum ThreadStatus {
 class Weft;
 class Thread;
 class Happens;
+class PTXLabel;
 class WeftAccess;
 class SharedMemory;
 class PTXInstruction;
@@ -44,7 +45,7 @@ public:
     : status(THREAD_ENABLED), next(NULL) { }
 public:
   ThreadStatus status;
-  PTXInstruction *next;
+  PTXLabel *next;
 };
 
 class Program {

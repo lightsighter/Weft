@@ -380,9 +380,27 @@ PTXInstruction* PTXLabel::emulate(Thread *thread)
   return next;
 }
 
-void PTXLabel::update_labels(std::map<std::string,PTXInstruction*> &labels)
+PTXInstruction* PTXLabel::emulate_warp(Thread **threads,
+                                       ThreadState *thread_state,
+                                       int &shared_access_id,
+                                       SharedStore &store)
 {
-  std::map<std::string,PTXInstruction*>::const_iterator finder = 
+  // Always check for convergence at the start of basic blocks
+  for (int i = 0; i < WARP_SIZE; i++)
+  {
+    if ((thread_state[i].status == THREAD_DISABLED) &&
+        (thread_state[i].next == this))
+    {
+      thread_state[i].status = THREAD_ENABLED;
+      thread_state[i].next = NULL;
+    }
+  }
+  return next;
+}
+
+void PTXLabel::update_labels(std::map<std::string,PTXLabel*> &labels)
+{
+  std::map<std::string,PTXLabel*>::const_iterator finder = 
     labels.find(label);
   assert(finder == labels.end());
   labels[label] = this;
@@ -537,18 +555,21 @@ PTXInstruction* PTXBranch::emulate_warp(Thread **threads,
       thread_state[i].status = THREAD_ENABLED;
       thread_state[i].next = NULL;
     }
-    else // Disable all threads not going to next
+    else if (thread_state[i].status == THREAD_ENABLED)
     {
+      // Disable all threads not going to next that 
+      // weren't already disabled to begin with
+      assert(targets[i] == target);
       thread_state[i].status = THREAD_DISABLED;
-      thread_state[i].next = targets[i];
+      thread_state[i].next = target;
     }
   }
   return next;
 }
 
-void PTXBranch::set_targets(const std::map<std::string,PTXInstruction*> &labels)
+void PTXBranch::set_targets(const std::map<std::string,PTXLabel*> &labels)
 {
-  std::map<std::string,PTXInstruction*>::const_iterator finder =
+  std::map<std::string,PTXLabel*>::const_iterator finder =
     labels.find(label);
   assert(finder != labels.end());
   assert(target == NULL);
@@ -1605,8 +1626,20 @@ PTXInstruction* PTXBarrier::emulate_warp(Thread **threads,
   // In warp-synchronous execution, if any thread in a warp arrives
   // at a barrier, then it is like all of the threads in a warp arrived
   // regardless of whether the thread is enabled, disabled, or exitted 
+  bool one_enabled = false;
   for (int i = 0; i < WARP_SIZE; i++)
-    emulate(threads[i]);
+  {
+    if (thread_state[i].status == THREAD_ENABLED)
+    {
+      one_enabled = true;
+      break;
+    }
+  }
+  if (one_enabled)
+  {
+    for (int i = 0; i < WARP_SIZE; i++)
+      emulate(threads[i]);
+  }
   return next;
 }
 
@@ -1660,9 +1693,9 @@ bool PTXBarrier::interpret(const std::string &line, int line_num,
 }
 
 PTXSharedAccess::PTXSharedAccess(int64_t ad, int64_t o, bool w, 
-                                 int64_t ag, bool imm, int line_num)
+                                 bool has, int64_t ag, bool imm, int line_num)
   : PTXInstruction(PTX_SHARED_ACCESS, line_num), 
-    addr(ad), offset(o), arg(ag), write(w), immediate(imm)
+    addr(ad), offset(o), arg(ag), write(w), has_arg(has), immediate(imm)
 {
 }
 
@@ -1694,6 +1727,8 @@ PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
   {
     for (int i = 0; i < WARP_SIZE; i++)
     {
+      if (thread_state[i].status != THREAD_ENABLED)
+        continue;
       int64_t addr_value;
       if (!threads[i]->get_value(addr, addr_value))
         continue;
@@ -1702,20 +1737,25 @@ PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
         new SharedWrite(address, this, threads[i], shared_access_id);
       threads[i]->add_instruction(instruction);
       threads[i]->update_shared_memory(instruction);
-      if (!immediate)
+      if (has_arg)
       {
-        int64_t value;
-        if (threads[i]->get_value(arg, value))
-          store.write(address, value);
+        if (!immediate)
+        {
+          int64_t value;
+          if (threads[i]->get_value(arg, value))
+            store.write(address, value);
+        }
+        else
+          store.write(address, arg);
       }
-      else
-        store.write(address, arg);
     }
   }
   else
   {
     for (int i = 0; i < WARP_SIZE; i++)
     {
+      if (thread_state[i].status != THREAD_ENABLED)
+        continue;
       int64_t addr_value;
       if (!threads[i]->get_value(addr, addr_value))
         continue;
@@ -1724,10 +1764,13 @@ PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
         new SharedRead(address, this, threads[i], shared_access_id);
       threads[i]->add_instruction(instruction);
       threads[i]->update_shared_memory(instruction);
-      assert(!immediate);
-      int64_t value;
-      if (store.read(address, value))
-        threads[i]->set_value(arg, value);
+      if (has_arg)
+      {
+        assert(!immediate);
+        int64_t value;
+        if (store.read(address, value))
+          threads[i]->set_value(arg, value);
+      }
     }
   }
   // Increment the shared_access_id
@@ -1742,35 +1785,40 @@ bool PTXSharedAccess::interpret(const std::string &line, int line_num,
   if ((line.find(".shared.") != std::string::npos) &&
       (line.find(".align.") == std::string::npos))
   {
-    std::vector<std::string> tokens;
-    split(tokens, line.c_str());
-    assert(tokens.size() == 3);
-    bool write = (tokens[0].find("st.") != std::string::npos);
+    
+    bool write = (line.find("st.") != std::string::npos);
     int64_t offset = 0;   
     int start_reg = line.find("[") + 1;
     int end_reg = line.find("+")+1;
     int64_t addr = parse_register(line.substr(start_reg));
     if (end_reg != (int) std::string::npos)
       offset = parse_immediate(line.substr(end_reg));
-    bool immediate;
-    int64_t arg;
-    if (write)
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    bool has_arg = false;
+    bool immediate = false;
+    int64_t arg = 0;
+    if (tokens.size() == 3)
     {
-      immediate = (tokens[2].find("%") == std::string::npos);
-      if (immediate)
-        arg = parse_immediate(tokens[2]);
+      has_arg = true;
+      if (write)
+      {
+        immediate = (tokens[2].find("%") == std::string::npos);
+        if (immediate)
+          arg = parse_immediate(tokens[2]);
+        else
+          arg = parse_register(tokens[2]);
+      }
       else
-        arg = parse_register(tokens[2]);
+      {
+        immediate = (tokens[1].find("%") == std::string::npos);
+        if (immediate)
+          arg = parse_immediate(tokens[1]);
+        else
+          arg = parse_register(tokens[1]);
+      }
     }
-    else
-    {
-      immediate = (tokens[1].find("%") == std::string::npos);
-      if (immediate)
-        arg = parse_immediate(tokens[1]);
-      else
-        arg = parse_register(tokens[1]);
-    }
-    result = new PTXSharedAccess(addr, offset, write, 
+    result = new PTXSharedAccess(addr, offset, write, has_arg, 
                                  arg, immediate, line_num);
     return true;
   }
@@ -2153,7 +2201,9 @@ PTXInstruction* PTXExit::emulate_warp(Thread **threads,
 bool PTXExit::interpret(const std::string &line, int line_num,
                         PTXInstruction *&result)
 {
-  if (line.find("exit") != std::string::npos)
+  // We'll model both return and exit the same
+  if ((line.find("exit") != std::string::npos) ||
+      (line.find("ret") != std::string::npos))
   {
     std::vector<std::string> tokens; 
     split(tokens, line.c_str());

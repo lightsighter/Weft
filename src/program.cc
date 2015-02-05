@@ -247,7 +247,7 @@ void Program::convert_to_instructions(int max_num_threads,
 {
   // Make a first pass and create all the instructions
   // Track all the basic block program counters
-  std::map<std::string,PTXInstruction*> labels;
+  std::map<std::string,PTXLabel*> labels;
   PTXInstruction *previous = NULL;
   for (std::vector<std::pair<std::string,int> >::const_iterator it = 
         lines.begin(); it != lines.end(); it++)
