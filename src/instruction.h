@@ -82,6 +82,7 @@ class BarrierSync;
 class BarrierArrive;
 class SharedWrite;
 class SharedRead;
+class SharedStore;
 class BarrierInstance;
 
 class PTXInstruction {
@@ -95,7 +96,8 @@ public:
   // to override this behavior so make it virtual
   virtual PTXInstruction* emulate_warp(Thread **threads,
                                        ThreadState *thread_state,
-                                       int &shared_access_id);
+                                       int &shared_access_id,
+                                       SharedStore &store);
 public:
   virtual bool is_label(void) const { return false; }
   virtual bool is_branch(void) const { return false; } 
@@ -157,7 +159,8 @@ public:
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
                                        ThreadState *thread_state,
-                                       int &shared_access_id);
+                                       int &shared_access_id,
+                                       SharedStore &store);
 public:
   virtual bool is_branch(void) const { return true; }
 public:
@@ -463,7 +466,8 @@ public:
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
                                        ThreadState *thread_state,
-                                       int &shared_access_id);
+                                       int &shared_access_id,
+                                       SharedStore &store);
 public:
   virtual bool is_barrier(void) const { return true; }
   virtual PTXBarrier* as_barrier(void) { return this; }
@@ -480,7 +484,8 @@ public:
 
 class PTXSharedAccess : public PTXInstruction {
 public:
-  PTXSharedAccess(int64_t addr, int64_t offset, bool write, int line_num);
+  PTXSharedAccess(int64_t addr, int64_t offset, bool write, 
+                  int64_t arg, bool immediate, int line_num);
   PTXSharedAccess(const PTXSharedAccess &rhs) { assert(false); }
   virtual ~PTXSharedAccess(void) { }
 public:
@@ -491,10 +496,11 @@ public:
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
                                        ThreadState *thread_state,
-                                       int &shared_access_id);
+                                       int &shared_access_id,
+                                       SharedStore &store);
 protected:
-  int64_t addr, offset;
-  bool write;
+  int64_t addr, offset, arg;
+  bool write, immediate;
 public:
   static bool interpret(const std::string &line, int line_num,
                         PTXInstruction *&result);
@@ -574,7 +580,8 @@ public:
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
                                        ThreadState *thread_state,
-                                       int &shared_access_id);
+                                       int &shared_access_id,
+                                       SharedStore &store);
   virtual bool is_shuffle(void) const { return true; }
 protected:
   ShuffleKind kind;
@@ -599,7 +606,8 @@ public:
   // Override for warp-synchronous execution!
   virtual PTXInstruction* emulate_warp(Thread **threads,
                                        ThreadState *thread_state,
-                                       int &shared_access_id);
+                                       int &shared_access_id,
+                                       SharedStore &store);
 protected:
   bool has_predicate;
   bool negate;

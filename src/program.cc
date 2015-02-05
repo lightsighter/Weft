@@ -207,6 +207,7 @@ void Program::emulate_warp(Thread **threads)
   for (int i = 0; i < WARP_SIZE; i++)
     dynamic_instructions[i] = 0;
   int shared_access_id = 0;
+  SharedStore store;
   bool profile = weft->print_verbose();
   if (profile)
   {
@@ -220,7 +221,8 @@ void Program::emulate_warp(Thread **threads)
           dynamic_instructions[i]++;
         }
       }
-      pc = pc->emulate_warp(threads, thread_state, shared_access_id);
+      pc = pc->emulate_warp(threads, thread_state, 
+                            shared_access_id, store);
     }
   }
   else
@@ -232,7 +234,8 @@ void Program::emulate_warp(Thread **threads)
         if (thread_state[i].status == THREAD_ENABLED)
           dynamic_instructions[i]++;
       }
-      pc = pc->emulate_warp(threads, thread_state, shared_access_id);
+      pc = pc->emulate_warp(threads, thread_state, 
+                            shared_access_id, store);
     }
   }
   for (int i = 0; i < WARP_SIZE; i++)
@@ -375,7 +378,7 @@ bool Thread::get_global_location(const char *name, int64_t &value)
 bool Thread::get_global_value(int64_t addr, int64_t &value)
 {
   int index = addr / SDDRINC;
-  if ((index >= 0) && (index < globals.size()))
+  if ((index >= 0) && (index < int(globals.size())))
   {
     size_t offset = addr - (index * SDDRINC);
     assert(offset < globals[index].size);
@@ -554,6 +557,20 @@ void Thread::compute_barriers_after(int max_num_barriers)
       has_update = false;
     }
   }
+}
+
+void SharedStore::write(int64_t addr, int64_t value)
+{
+  store[addr] = value;
+}
+
+bool SharedStore::read(int64_t addr, int64_t &value)
+{
+  std::map<int64_t,int64_t>::const_iterator finder = store.find(addr);
+  if (finder == store.end())
+    return false;
+  value = finder->second;
+  return true;
 }
 
 EmulateThread::EmulateThread(Thread *t)

@@ -215,7 +215,8 @@ PTXInstruction::~PTXInstruction(void)
 
 PTXInstruction* PTXInstruction::emulate_warp(Thread **threads,
                                              ThreadState *thread_state,
-                                             int &shared_access_id)
+                                             int &shared_access_id,
+                                             SharedStore &store)
 {
   // For most instructions, we can just call
   // emulate on individual threads that are enabled.
@@ -440,7 +441,8 @@ PTXInstruction* PTXBranch::emulate(Thread *thread)
 
 PTXInstruction* PTXBranch::emulate_warp(Thread **threads,
                                         ThreadState *thread_state,
-                                        int &shared_access_id)
+                                        int &shared_access_id,
+                                        SharedStore &store)
 {
   // Evaluate all the branches for all the enabled threads
   PTXInstruction *targets[WARP_SIZE];
@@ -1597,7 +1599,8 @@ PTXInstruction* PTXBarrier::emulate(Thread *thread)
 
 PTXInstruction* PTXBarrier::emulate_warp(Thread **threads,
                                          ThreadState *thread_state,
-                                         int &shared_access_id)
+                                         int &shared_access_id,
+                                         SharedStore &store)
 {
   // In warp-synchronous execution, if any thread in a warp arrives
   // at a barrier, then it is like all of the threads in a warp arrived
@@ -1656,9 +1659,10 @@ bool PTXBarrier::interpret(const std::string &line, int line_num,
   return false;
 }
 
-PTXSharedAccess::PTXSharedAccess(int64_t a, int64_t o, bool w, int line_num)
+PTXSharedAccess::PTXSharedAccess(int64_t ad, int64_t o, bool w, 
+                                 int64_t ag, bool imm, int line_num)
   : PTXInstruction(PTX_SHARED_ACCESS, line_num), 
-    addr(a), offset(o), write(w)
+    addr(ad), offset(o), arg(ag), write(w), immediate(imm)
 {
 }
 
@@ -1680,7 +1684,8 @@ PTXInstruction* PTXSharedAccess::emulate(Thread *thread)
 
 PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
                                               ThreadState *thread_state,
-                                              int &shared_access_id)
+                                              int &shared_access_id,
+                                              SharedStore &store)
 {
   // Shared accesses work mostly the same, but we want to detect
   // races from threads in the same warp doing accesses at the 
@@ -1689,28 +1694,40 @@ PTXInstruction* PTXSharedAccess::emulate_warp(Thread **threads,
   {
     for (int i = 0; i < WARP_SIZE; i++)
     {
-      int64_t value;
-      if (!threads[i]->get_value(addr, value))
+      int64_t addr_value;
+      if (!threads[i]->get_value(addr, addr_value))
         continue;
-      int64_t address = value + offset;
+      int64_t address = addr_value + offset;
       WeftAccess *instruction = 
         new SharedWrite(address, this, threads[i], shared_access_id);
       threads[i]->add_instruction(instruction);
       threads[i]->update_shared_memory(instruction);
+      if (!immediate)
+      {
+        int64_t value;
+        if (threads[i]->get_value(arg, value))
+          store.write(address, value);
+      }
+      else
+        store.write(address, arg);
     }
   }
   else
   {
     for (int i = 0; i < WARP_SIZE; i++)
     {
-      int64_t value;
-      if (!threads[i]->get_value(addr, value))
+      int64_t addr_value;
+      if (!threads[i]->get_value(addr, addr_value))
         continue;
-      int64_t address = value + offset;
+      int64_t address = addr_value + offset;
       WeftAccess *instruction = 
         new SharedRead(address, this, threads[i], shared_access_id);
       threads[i]->add_instruction(instruction);
       threads[i]->update_shared_memory(instruction);
+      assert(!immediate);
+      int64_t value;
+      if (store.read(address, value))
+        threads[i]->set_value(arg, value);
     }
   }
   // Increment the shared_access_id
@@ -1725,14 +1742,36 @@ bool PTXSharedAccess::interpret(const std::string &line, int line_num,
   if ((line.find(".shared.") != std::string::npos) &&
       (line.find(".align.") == std::string::npos))
   {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 3);
+    bool write = (tokens[0].find("st.") != std::string::npos);
     int64_t offset = 0;   
     int start_reg = line.find("[") + 1;
     int end_reg = line.find("+")+1;
     int64_t addr = parse_register(line.substr(start_reg));
     if (end_reg != (int) std::string::npos)
       offset = parse_immediate(line.substr(end_reg));
-    bool write = (line.find("st.") != std::string::npos);
-    result = new PTXSharedAccess(addr, offset, write, line_num);
+    bool immediate;
+    int64_t arg;
+    if (write)
+    {
+      immediate = (tokens[2].find("%") == std::string::npos);
+      if (immediate)
+        arg = parse_immediate(tokens[2]);
+      else
+        arg = parse_register(tokens[2]);
+    }
+    else
+    {
+      immediate = (tokens[1].find("%") == std::string::npos);
+      if (immediate)
+        arg = parse_immediate(tokens[1]);
+      else
+        arg = parse_register(tokens[1]);
+    }
+    result = new PTXSharedAccess(addr, offset, write, 
+                                 arg, immediate, line_num);
     return true;
   }
   return false;
@@ -1895,7 +1934,8 @@ PTXInstruction* PTXShuffle::emulate(Thread *thread)
 
 PTXInstruction* PTXShuffle::emulate_warp(Thread **threads,
                                          ThreadState *thread_state,
-                                         int &shared_access_id)
+                                         int &shared_access_id,
+                                         SharedStore &store)
 {
   // Compute the inputs from each thread
   int64_t inputs[WARP_SIZE];
@@ -2062,7 +2102,8 @@ PTXInstruction* PTXExit::emulate(Thread *thread)
 
 PTXInstruction* PTXExit::emulate_warp(Thread **threads,
                                       ThreadState *thread_state,
-                                      int &shared_access_id)
+                                      int &shared_access_id,
+                                      SharedStore &store)
 {
   // Evaluate this for all the enabled threads
   for (int i = 0; i < WARP_SIZE; i++)

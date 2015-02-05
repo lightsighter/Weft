@@ -145,4 +145,18 @@ protected:
   std::deque<Happens*>                            all_happens;
 };
 
+class SharedStore {
+public:
+  SharedStore(void) { }
+  SharedStore(const SharedStore &rhs) { assert(false); }
+  ~SharedStore(void) { }
+public:
+  SharedStore& operator=(const SharedStore &rhs) { assert(false); return *this; }
+public:
+  void write(int64_t addr, int64_t value);
+  bool read(int64_t addr, int64_t &value);
+protected:
+  std::map<int64_t/*addr*/,int64_t/*value*/> store;
+};
+
 #endif //__PROGRAM_H__
