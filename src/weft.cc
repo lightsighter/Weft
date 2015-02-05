@@ -355,13 +355,15 @@ void Weft::print_statistics(void)
                                     shared_memory->count_addresses());
   fprintf(stdout,"  Physical Named Barriers;   %15d\n", max_num_barriers);
   fprintf(stdout,"  Dynamic Barrier Instances: %15d\n", 
-                                       graph->count_total_barriers());
+                                    graph->count_total_barriers());
   fprintf(stdout,"  Static Instructions:       %15d\n", 
-                                       program->count_instructions());
+                                    program->count_instructions());
   fprintf(stdout,"  Dynamic Instructions:      %15d\n",
-                                        count_dynamic_instructions());
+                                    count_dynamic_instructions());
+  fprintf(stdout,"  Weft Statements:           %15d\n",
+                                    count_weft_statements());   
   fprintf(stdout,"  Total Race Tests:          %15ld\n",
-                                   shared_memory->count_race_tests());
+                                    shared_memory->count_race_tests());
 }
 
 int Weft::count_dynamic_instructions(void)
@@ -371,6 +373,17 @@ int Weft::count_dynamic_instructions(void)
         it != threads.end(); it++)
   {
     result += (*it)->count_dynamic_instructions();
+  }
+  return result;
+}
+
+int Weft::count_weft_statements(void)
+{
+  int result = 0;
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+  {
+    result += (*it)->count_weft_statements();
   }
   return result;
 }

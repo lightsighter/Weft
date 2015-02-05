@@ -206,6 +206,7 @@ protected:
   void check_for_race_conditions(void);
   void print_statistics(void);
   int count_dynamic_instructions(void);
+  int count_weft_statements(void);
 protected:
   void start_threadpool(void);
   void stop_threadpool(void);

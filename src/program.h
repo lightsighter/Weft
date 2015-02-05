@@ -120,6 +120,8 @@ public:
     { return ((unsigned(idx) < instructions.size()) ? instructions[idx] : NULL); } 
   inline int count_dynamic_instructions(void) const 
     { return dynamic_instructions; }
+  inline int count_weft_statements(void) const
+    { return instructions.size(); }
   inline void set_dynamic_instructions(int count) { dynamic_instructions = count; }
 public:
   void initialize_happens(int total_threads, int max_num_barriers);
