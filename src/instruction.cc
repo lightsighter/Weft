@@ -43,11 +43,12 @@ inline bool contains(const std::string &s1, const std::string &s2)
 }
 
 inline void split(std::vector<std::string> &results, 
-                  const char *str, char c = ' ') 
+                  const char *str, char c = ',') 
 {
   do {
     const char *begin = str;
-    while ((*str != c) && (*str != '\t') && (*str)) str++;
+    while ((*str != ' ') && (*str != '\t') && 
+           (*str != c) && (*str)) str++;
 
     std::string result(begin, str);
     if (!result.empty())
