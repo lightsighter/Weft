@@ -283,8 +283,10 @@ void Program::convert_to_instructions(int max_num_threads,
   }
 }
 
-Thread::Thread(unsigned tid, Program *p, SharedMemory *m)
-  : thread_id(tid), program(p), shared_memory(m), 
+Thread::Thread(unsigned tid, int tidx, int tidy, int tidz,
+               Program *p, SharedMemory *m)
+  : thread_id(tid), tid_x(tidx), tid_y(tidy), tid_z(tidz),
+    program(p), shared_memory(m), 
     max_barrier_name(-1), dynamic_instructions(0)
 {
   dynamic_counts.resize(PTX_LAST, 0);
@@ -309,11 +311,30 @@ Thread::~Thread(void)
 
 void Thread::initialize(void)
 {
+  int block_dim[3];
+  int block_id[3];
+  int grid_dim[3];
+  program->weft->fill_block_dim(block_dim);
+  program->weft->fill_block_id(block_id);
+  program->weft->fill_grid_dim(grid_dim);
   // Before starting emulation fill in the special
   // values for particular registers
-  register_store[WEFT_TID_REG] = thread_id;
-  // Use 0 as the default CTA ID
-  register_store[WEFT_CTA_REG] = 0;
+  register_store[WEFT_TID_X_REG] = tid_x;
+  register_store[WEFT_TID_Y_REG] = tid_y;
+  register_store[WEFT_TID_Z_REG] = tid_z;
+  register_store[WEFT_NTID_X_REG] = block_dim[0];
+  register_store[WEFT_NTID_Y_REG] = block_dim[1];
+  register_store[WEFT_NTID_Z_REG] = block_dim[2];
+  register_store[WEFT_LANE_REG] = (thread_id % WARP_SIZE);
+  register_store[WEFT_WARP_REG] = (thread_id / WARP_SIZE);
+  register_store[WEFT_NWARP_REG] = 
+    (block_dim[0] * block_dim[1] * block_dim[2] + (WARP_SIZE-1)) / WARP_SIZE;
+  register_store[WEFT_CTA_X_REG] = block_id[0];
+  register_store[WEFT_CTA_Y_REG] = block_id[1];
+  register_store[WEFT_CTA_Z_REG] = block_id[2];
+  register_store[WEFT_NCTA_X_REG] = grid_dim[0];
+  register_store[WEFT_NCTA_Y_REG] = grid_dim[1];
+  register_store[WEFT_NCTA_Z_REG] = grid_dim[2];
 }
 
 void Thread::emulate(void)

@@ -42,20 +42,6 @@ inline bool contains(const std::string &s1, const std::string &s2)
   return (s1.find(s2) != std::string::npos);
 }
 
-inline void split(std::vector<std::string> &results, 
-                  const char *str, char c = ',') 
-{
-  do {
-    const char *begin = str;
-    while ((*str != ' ') && (*str != '\t') && 
-           (*str != c) && (*str)) str++;
-
-    std::string result(begin, str);
-    if (!result.empty())
-      results.push_back(result);
-  } while (0 != *str++);
-}
-
 inline bool filter_identifier(char c)
 {
   if (c == '_')
@@ -164,10 +150,37 @@ inline int64_t parse_predicate(const std::string &pred, bool &negate)
 inline int64_t parse_register(const std::string &reg)
 {
   // Do a quick check for any of the special registers
-  if (reg.find("%tid") != std::string::npos)
-    return WEFT_TID_REG;
-  if (reg.find("%ctaid") != std::string::npos)
-    return WEFT_CTA_REG;
+  if (reg.find("%tid.x") != std::string::npos)
+    return WEFT_TID_X_REG;
+  if (reg.find("%tid.y") != std::string::npos)
+    return WEFT_TID_Y_REG;
+  if (reg.find("%tid.z") != std::string::npos)
+    return WEFT_TID_Z_REG;
+  if (reg.find("%ntid.x") != std::string::npos)
+    return WEFT_NTID_X_REG;
+  if (reg.find("%ntid.y") != std::string::npos)
+    return WEFT_NTID_Y_REG;
+  if (reg.find("%ntid.z") != std::string::npos)
+    return WEFT_NTID_Z_REG;
+  if (reg.find("%laneid") != std::string::npos)
+    return WEFT_LANE_REG;
+  if (reg.find("%warpid") != std::string::npos)
+    return WEFT_WARP_REG;
+  if (reg.find("%nwarpid") != std::string::npos)
+    return WEFT_NWARP_REG;
+  if (reg.find("%ctaid.x") != std::string::npos)
+    return WEFT_CTA_X_REG;
+  if (reg.find("%ctaid.y") != std::string::npos)
+    return WEFT_CTA_Y_REG;
+  if (reg.find("%ctaid.z") != std::string::npos)
+    return WEFT_CTA_Z_REG;
+  if (reg.find("%nctaid.x") != std::string::npos)
+    return WEFT_NCTA_X_REG;
+  if (reg.find("%nctaid.y") != std::string::npos)
+    return WEFT_NCTA_Y_REG;
+  if (reg.find("%nctaid.z") != std::string::npos)
+    return WEFT_NCTA_Z_REG;
+
   // Find the start of the identifier
   const char *str = reg.c_str();
   size_t size = reg.size();

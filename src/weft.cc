@@ -18,6 +18,7 @@
 #include "race.h"
 #include "graph.h"
 #include "program.h"
+#include "instruction.h"
 
 #include <string>
 
@@ -42,6 +43,12 @@ Weft::Weft(int argc, char **argv)
     program(NULL), shared_memory(NULL), graph(NULL),
     worker_threads(NULL), pending_count(0)
 {
+  for (int i = 0; i < 3; i++)
+    block_dim[i] = 1;
+  for (int i = 0; i < 3; i++)
+    block_id[i] = 0;
+  for (int i = 0; i < 3; i++)
+    grid_dim[i] = 1;
   parse_inputs(argc, argv);  
   start_threadpool();
 }
@@ -98,9 +105,21 @@ void Weft::parse_inputs(int argc, char **argv)
 {
   for (int i = 1; i < argc; i++)
   {
+    if (!strcmp(argv[i],"-b"))
+    {
+      std::string block(argv[++i]);
+      parse_triple(block, block_id, "-b", "CTA ID");
+      continue;
+    }
     if (!strcmp(argv[i],"-f"))
     {
       file_name = argv[++i];
+      continue;
+    }
+    if (!strcmp(argv[i],"-g"))
+    {
+      std::string grid(argv[++i]);
+      parse_triple(grid, grid_dim, "-g", "Grid Size");
       continue;
     }
     if (!strcmp(argv[i],"-i"))
@@ -110,9 +129,10 @@ void Weft::parse_inputs(int argc, char **argv)
     }
     if (!strcmp(argv[i],"-n"))
     {
-      max_num_threads = atoi(argv[++i]);
-      if (max_num_threads < 1)
-        max_num_threads = -1;
+      std::string threads(argv[++i]);
+      // If we succeeded, compute the max number of threads
+      if (parse_triple(threads, block_dim, "-n", "CTA size"))
+        max_num_threads = block_dim[0] * block_dim[1] * block_dim[2];
       continue;
     }
     if (!strcmp(argv[i],"-s"))
@@ -152,7 +172,8 @@ void Weft::parse_inputs(int argc, char **argv)
   {
     fprintf(stdout,"INITIAL WEFT SETTINGS:\n");
     fprintf(stdout,"  File Name: %s\n", file_name);
-    fprintf(stdout,"  Max Number of Threads: %d\n", max_num_threads);
+    fprintf(stdout,"  CTA dimensions: (%d,%d,%d)\n", 
+                      block_dim[0], block_dim[1], block_dim[2]);
     fprintf(stdout,"  Thread Pool Size: %d\n", thread_pool_size);
     fprintf(stdout,"  Verbose: %s\n", (verbose ? "yes" : "no"));
     fprintf(stdout,"  Instrument: %s\n", (instrument ? "yes" : "no"));
@@ -161,18 +182,73 @@ void Weft::parse_inputs(int argc, char **argv)
   }
 }
 
+bool Weft::parse_triple(const std::string &input, int *array,
+                        const char *flag, const char *error_str)
+{
+  bool success = true;
+  if (input.find("x") != std::string::npos)
+  {
+    // Try parsing this block configuration
+    std::vector<std::string> values;
+    split(values, input.c_str(), 'x');
+    if (!values.empty() && (values.size() <= 3))
+    {
+      // Try parsing each of the arguments   
+      for (unsigned i = 0; i < values.size(); i++)
+      {
+        int count = atoi(values[i].c_str());
+        if (count < 1)
+        {
+          fprintf(stderr,"WEFT WARNING: Failed to parse dimension %d "
+                         "of %s: \"%s %s\"!\n",
+                         i, error_str, flag, input.c_str());
+          success = false;
+          break;
+        }
+        array[i] = count;
+      }
+    }
+    else
+    {
+      fprintf(stderr,"WEFT WARNING: Failed to parse %s with %ld"
+               "dimensions from input: \"%s %s\"!\n", 
+               error_str, values.size(), flag, input.c_str());
+      success = false;
+    }
+  }
+  else
+  {
+    int count = atoi(input.c_str());
+    if (count >= 1)
+      array[0] = count;
+    else
+    {
+      success = false;
+      fprintf(stderr,"WEFT WARNING: Ignoring invalid input for %s "
+                     "\"%s %s\"!\n", error_str, flag, input.c_str());
+    }
+  }
+  return success;
+}
+
 void Weft::report_usage(int error, const char *error_str)
 {
   fprintf(stderr,"WEFT ERROR %d: %s!\nWEFT WILL NOW EXIT...\n", 
           error, error_str);
   fprintf(stderr,"Usage: Weft [args]\n");
+  fprintf(stderr,"  -b: specify the block id to simulate (default 0x0x0)\n");
+  fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 0x0x1 or 1x2\n");
   fprintf(stderr,"  -f: specify the input file\n");
+  fprintf(stderr,"  -g: specify the grid dimensions for the kernel being simulated\n");
+  fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 32x32x2 or 32x1\n");
+  fprintf(stderr,"      Weft will still only simulate a single CTA specified by '-b'\n");
   fprintf(stderr,"  -i: instrument execution\n");
   fprintf(stderr,"  -n: maximum number of threads per CTA\n");
+  fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 64x2 or 32x8x1\n");
   fprintf(stderr,"  -s: assume warp-synchronous execution\n");
   fprintf(stderr,"  -t: thread pool size\n");
   fprintf(stderr,"  -v: print verbose output\n");
-  fprintf(stderr,"  -w: report emulation warnings (will generate large output)\n");
+  fprintf(stderr,"  -w: report emulation warnings (this will generate considerable output)\n");
   exit(error);
 }
 
@@ -220,6 +296,7 @@ void Weft::emulate_threads(void)
   assert(shared_memory == NULL);
   shared_memory = new SharedMemory(this);
   assert(max_num_threads > 0);
+  assert(max_num_threads == (block_dim[0]*block_dim[1]*block_dim[2]));
   threads.resize(max_num_threads, NULL);
   // If we are doing warp synchronous execution we 
   // execute all the threads in a warp together
@@ -227,22 +304,44 @@ void Weft::emulate_threads(void)
   {
     assert((max_num_threads % WARP_SIZE) == 0);
     initialize_count(max_num_threads/WARP_SIZE);
-    for (int i = 0; i < max_num_threads; i+= WARP_SIZE)
+    int tid = 0;
+    for (int z = 0; z < block_dim[2]; z++)
     {
-      for (int j = 0; j < WARP_SIZE; j++)
-        threads[i+j] = new Thread(i+j, program, shared_memory);
-      EmulateWarp *task = new EmulateWarp(program, &(threads[i]));
-      enqueue_task(task);
+      for (int y = 0; y < block_dim[1]; y++)
+      {
+        for (int x = 0; x < block_dim[0]; x++)
+        {
+          threads[tid] = new Thread(tid, x, y, z, program, shared_memory);
+          // Increment first
+          tid++;
+          // Only kick off a warp once we've generated all the threads
+          if ((tid % WARP_SIZE) == 0)
+          {
+            assert((tid-WARP_SIZE) >= 0);
+            EmulateWarp *task = 
+              new EmulateWarp(program, &(threads[tid-WARP_SIZE]));
+            enqueue_task(task);
+          }
+        }
+      }
     }
   }
   else
   {
     initialize_count(max_num_threads);
-    for (int i = 0; i < max_num_threads; i++)
+    int tid = 0;
+    for (int z = 0; z < block_dim[2]; z++)
     {
-      threads[i] = new Thread(i, program, shared_memory); 
-      EmulateThread *task = new EmulateThread(threads[i]);
-      enqueue_task(task);
+      for (int y = 0; y < block_dim[1]; y++)
+      {
+        for (int x = 0; x < block_dim[0]; x++)
+        {
+          threads[tid] = new Thread(tid, x, y, z, program, shared_memory); 
+          EmulateThread *task = new EmulateThread(threads[tid]);
+          enqueue_task(task);
+          tid++;
+        }
+      }
     }
   }
   wait_until_done();
@@ -349,7 +448,7 @@ void Weft::check_for_race_conditions(void)
 
 void Weft::print_statistics(void)
 {
-  fprintf(stdout,"WEFT STATISTICS\n");
+  fprintf(stdout,"WEFT STATISTICS for %s\n", file_name);
   fprintf(stdout,"  CTA Thread Count:          %15d\n", max_num_threads);
   fprintf(stdout,"  Shared Memory Locations:   %15d\n", 
                                     shared_memory->count_addresses());
@@ -386,6 +485,24 @@ int Weft::count_weft_statements(void)
     result += (*it)->count_weft_statements();
   }
   return result;
+}
+
+void Weft::fill_block_dim(int *array)
+{
+  for (int i = 0; i < 3; i++)
+    array[i] = block_dim[i];
+}
+
+void Weft::fill_block_id(int *array)
+{
+  for (int i = 0; i < 3; i++)
+    array[i] = block_id[i];
+}
+
+void Weft::fill_grid_dim(int *array)
+{
+  for (int i = 0; i < 3; i++)
+    array[i] = grid_dim[i];
 }
 
 void Weft::start_threadpool(void)

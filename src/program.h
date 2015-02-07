@@ -82,8 +82,9 @@ public:
     size_t size;
   };
 public:
-  Thread(unsigned thread_id, Program *p, SharedMemory *s);
-  Thread(const Thread &rhs) : thread_id(0), 
+  Thread(unsigned thread_id, int tidx, int tidy, int tidz, 
+         Program *p, SharedMemory *s);
+  Thread(const Thread &rhs) : thread_id(0), tid_x(-1), tid_y(-1), tid_z(-1),
     program(NULL), shared_memory(NULL) { assert(false); }
   ~Thread(void);
 public:
@@ -132,6 +133,7 @@ protected:
   void compute_barriers_after(int max_num_barriers);
 public:
   const unsigned thread_id;
+  const int tid_x, tid_y, tid_z;
   Program *const program;
   SharedMemory *const shared_memory;
 protected:

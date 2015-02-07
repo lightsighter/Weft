@@ -22,6 +22,7 @@
 #include <pthread.h>
 #include <deque>
 #include <vector>
+#include <string>
 
 #define PTHREAD_SAFE_CALL(cmd)        \
   {                                   \
@@ -198,6 +199,8 @@ public:
   inline bool assume_warp_synchronous(void) const { return warp_synchronous; }
 protected:
   void parse_inputs(int argc, char **argv);
+  bool parse_triple(const std::string &input, int *array,
+                    const char *flag, const char *error_str);
   void report_usage(int error, const char *error_str);
   void parse_ptx(void);
   void emulate_threads(void); 
@@ -207,6 +210,10 @@ protected:
   void print_statistics(void);
   int count_dynamic_instructions(void);
   int count_weft_statements(void);
+public:
+  void fill_block_dim(int *array);
+  void fill_block_id(int *array);
+  void fill_grid_dim(int *array);
 protected:
   void start_threadpool(void);
   void stop_threadpool(void);
@@ -226,6 +233,9 @@ protected:
   void report_instrumentation(void);
 protected:
   const char *file_name;
+  int block_dim[3]; // x, y, z
+  int block_id[3]; // x, y, z
+  int grid_dim[3]; // x, y, z
   int max_num_threads;
   int thread_pool_size;
   int max_num_barriers;

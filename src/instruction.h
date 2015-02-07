@@ -27,8 +27,22 @@
 #include <cstring>
 
 // Special registers get special values
-#define WEFT_TID_REG    (-1)
-#define WEFT_CTA_REG    (-2)
+// Make these macros so they can be negative
+#define WEFT_TID_X_REG    (-1)
+#define WEFT_TID_Y_REG    (-2)
+#define WEFT_TID_Z_REG    (-3)
+#define WEFT_NTID_X_REG   (-4)
+#define WEFT_NTID_Y_REG   (-5)
+#define WEFT_NTID_Z_REG   (-6)
+#define WEFT_LANE_REG     (-7)
+#define WEFT_WARP_REG     (-8)
+#define WEFT_NWARP_REG    (-9)
+#define WEFT_CTA_X_REG    (-10)
+#define WEFT_CTA_Y_REG    (-11)
+#define WEFT_CTA_Z_REG    (-12)
+#define WEFT_NCTA_X_REG   (-13)
+#define WEFT_NCTA_Y_REG   (-14)
+#define WEFT_NCTA_Z_REG   (-15)
 
 #define SDDRINC (100000000)
 
@@ -71,6 +85,21 @@ enum CompType {
   COMP_LE,
   COMP_LT,
 };
+
+// Some helper methods
+inline void split(std::vector<std::string> &results, 
+                  const char *str, char c = ',') 
+{
+  do {
+    const char *begin = str;
+    while ((*str != ' ') && (*str != '\t') && 
+           (*str != c) && (*str)) str++;
+
+    std::string result(begin, str);
+    if (!result.empty())
+      results.push_back(result);
+  } while (0 != *str++);
+}
 
 class Thread;
 class PTXLabel;
