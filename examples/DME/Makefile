@@ -16,11 +16,11 @@
 
 FERMI_INPUTS	:= diff_fermi.cu \
 		   visc_fermi.cu \
-		   fast_fermi.cu
+		   chem_fermi.cu
 
 KEPLER_INPUTS	:= diff_kepler.cu \
 		   visc_kepler.cu \
-		   fast_kepler.cu
+		   chem_kepler.cu
 
 FERMI_OUTPUTS 	:= $(FERMI_INPUTS:.cu=.ptx)
 KEPLER_OUTPUTS	:= $(KEPLER_INPUTS:.cu=.ptx)

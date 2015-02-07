@@ -73,7 +73,7 @@ echo "Running DME diffusion fermi..."
 echo "Running DME viscosity fermi..."
 ../../src/weft -s -t 4 visc_fermi.ptx
 echo "Running DME chemistry fermi..."
-../../src/weft -s -t 4 fast_fermi.ptx
+../../src/weft -s -t 4 chem_fermi.ptx
 
 #Kepler switches on warp synchronization when shuffles are detected
 echo "Running DME diffusion kepler..."
@@ -81,7 +81,7 @@ echo "Running DME diffusion kepler..."
 echo "Running DME viscosity kepler..."
 ../../src/weft -t 4 visc_kepler.ptx
 echo "Running DME chemistry kepler..."
-../../src/weft -t 4 fast_kepler.ptx
+../../src/weft -t 4 chem_kepler.ptx
 
 make clean
 cd ..
@@ -96,7 +96,7 @@ echo "Running Heptane diffusion fermi..."
 echo "Running Heptane viscosity fermi..."
 ../../src/weft -s -t 4 visc_fermi.ptx
 echo "Running Heptane chemistry fermi..."
-../../src/weft -s -t 4 fast_fermi.ptx
+../../src/weft -s -t 4 chem_fermi.ptx
 
 #Kepler switches on warp synchronization when shuffles are detected
 echo "Running Heptane diffusion kepler..."
@@ -104,7 +104,7 @@ echo "Running Heptane diffusion kepler..."
 echo "Running Heptane viscosity kepler..."
 ../../src/weft -t 4 visc_kepler.ptx
 echo "Running Heptane chemistry kepler..."
-../../src/weft -t 4 fast_kepler.ptx
+../../src/weft -t 4 chem_kepler.ptx
 
 make clean
 cd ..
