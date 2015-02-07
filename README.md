@@ -76,7 +76,7 @@ This will build the Weft binary `weft`. You may wish to add the
 directory containing the Weft binary to your path using the
 following command.
 
-    $ export PATH=$PATH:/\<path\_to\_weft\>/src
+    $ export PATH=$PATH:/<path_to_weft>/src
 
 Using Weft
 ----
@@ -97,7 +97,7 @@ some cases, the flags for compute architecture (`-arch`) and
 machine size (`-m`) may need to be specified depending on the
 kernel being compiled. Below are the two ways that we invoke 
 the CUDA compiler on all of our example kernels for the
-Fermi and Kepler architectures respectively. Each of example
+Fermi and Kepler architectures respectively.
 
     $ nvcc -ptx -lineinfo -m64 -arch=compute\_20 source.cu
     $ nvcc -ptx -lineinfo -m64 -arch=compute\_35 source.cu
@@ -106,17 +106,18 @@ The resulting PTX file is the input to Weft. The PTX file name
 can either be specified to Weft using the `-f` flag or as the
 last argument.
 
+    $ weft -f source.ptx -s -t 4
     $ weft source.ptx
 
 As part of its validation, Weft needs to know how many threads
 are in each CTA. For kernels with 1-D CTAs, Weft can infer this
 information if the `__launch_bounds__` annotation was given on
-the original kernel. However, if this declaration did not exits on
+the CUDA original kernel. However, if this declaration did not exits on
 the original source kernel, then it must be explicitly specified
 using the `-n` flag. As an example, our `saxpy_single.cu` source
-file contains has no `__launch_bounds__` declaration on its
+file contains no `__launch_bounds__` declaration on its
 kernel, therefore we must tell Weft that the kernel requires CTAs
-contain 320 threads.
+containing 320 threads.
 
     $ weft -n 320 saxpy_single.ptx
 
@@ -144,7 +145,7 @@ For most multi-core architectures we find that 2-4 threads is a good
 option. Weft is primarily a memory bound application, and having two
 threads per socket is usually sufficient to saturate memory bandwidth.
 
-We have provided many example kernels for Weft in the `examples` 
+We have provided a set of test kernels for Weft in the `examples` 
 directory. Each individual directory contains its own Makefile for
 generating the PTX code for individual kernels. We also have a script 
 called `run_examples.sh` in the main `examples` directory which will 
