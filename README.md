@@ -54,9 +54,9 @@ Prerequisites
 Weft requires an installation of the CUDA compiler for generating
 input PTX files. The CUDA toolkit can be downloaded 
 [here](https://developer.nvidia.com/cuda-downloads). Weft requires
-at least CUDA version 5.0 or later.
+CUDA version 5.0 or later.
 
-Weft can be built with a standard C++ compiler. We've built Weft
+Weft can be built with a standard C++ compiler. Weft has been tested
 with g++ and clang on both Linux and Mac systems.
 
 Downloading and Building Weft
@@ -65,17 +65,18 @@ Downloading and Building Weft
 Weft is available on github under the Apache Software License
 version 2.0. To clone a copy of the Weft source type:
 
-  $ git clone https://github.com/lightsighter/Weft.git
+    $ git clone https://github.com/lightsighter/Weft.git
 
-After cloning the repository, change into `src` directory
+After cloning the repository, change into the `src` directory
 and type:
 
-  $ make
+    $ make
 
-This will build the Weft binary. You may wish to add the 
-directory containing the Weft binary to your path.
+This will build the Weft binary `weft`. You may wish to add the 
+directory containing the Weft binary to your path using the
+following command.
 
-  $ export PATH=$PATH:/<path_to_weft>/src
+    $ export PATH=$PATH:/\<path\_to\_weft\>/src
 
 Using Weft
 ====
@@ -98,14 +99,14 @@ kernel being compiled. Below are the two ways that we invoke
 the CUDA compiler on all of our example kernels for the
 Fermi and Kepler architectures respectively.
 
-Fermi:  $ nvcc -ptx -lineinfo -m64 -arch=compute\_20 source.cu
-Kepler: $ nvcc -ptx -lineinfo -m64 -arch=compute\_35 source.cu
+    $ nvcc -ptx -lineinfo -m64 -arch=compute\_20 source.cu
+    $ nvcc -ptx -lineinfo -m64 -arch=compute\_35 source.cu
 
 The resulting PTX file is the input to Weft. The PTX file name
 can either be specified to Weft using the `-f` flag or as the
 last argument.
 
-  $ weft source.ptx
+    $ weft source.ptx
 
 As part of its validation, Weft needs to know how many threads
 are in each CTA. For kernels with 1-D CTAs, Weft can infer this
@@ -114,17 +115,17 @@ the original kernel. However, if this declaration did not exits on
 the original source kernel, then it must be explicitly specified
 using the `-n` flag. As an example, our `saxpy_single.cu` source
 file contains has no `__launch_bounds__` declaration on its
-kernel, therefore we must tell Weft that the kernel assumes CTAs
-of 320 threads.
+kernel, therefore we must tell Weft that the kernel requires CTAs
+contain 320 threads.
 
-  $ weft -n 320 saxpy\_single.ptx
+    $ weft -n 320 saxpy\_single.ptx
 
 Note that the `-n` flag should also be used to specify multi-dimensional
 CTA shapes which cannot be captured by the `__launch_bounds__` 
 annotation. Both of the following are valid examples:
 
-  $ weft -n 320x1x1 saxpy\_single.ptx
-  $ weft -n 16x16 dgemm.ptx
+    $ weft -n 320x1x1 saxpy\_single.ptx
+    $ weft -n 16x16 dgemm.ptx
 
 Weft supports a large set of command line flags which we cover in
 more detail [later](#command-line-arguments). We mention two flags
@@ -133,7 +134,7 @@ Weft does not assume <em>warp synchronous</em> execution where all
 threads in a warp execute in lock-step. Many CUDA programs rely on 
 this property for correctness. The warp synchronous execution assumption
 can be enabled in Weft by passing the `-s` flag on the command line.
-As an example, the Fermi chemistry kernel in `examples/DME/chem\_fermi.cu`
+As an example, the Fermi chemistry kernel in `examples/DME/chem_fermi.cu`
 will report races if run under normal assumptions, but will always be 
 race free under a warp synchronous execution.
 
@@ -145,10 +146,10 @@ threads per socket is usually sufficient to saturate memory bandwidth.
 
 We have provided many example kernels for Weft in the `examples` 
 directory. Each individual directory contains its own Makefile for
-generating the PTX code for each kernel. We also have a script called
-in `run_examples.sh` in the main `examples` directory which will 
+generating the PTX code for individual kernels. We also have a script 
+called `run_examples.sh` in the main `examples` directory which will 
 validate all of the example kernels. Note that some kernels will 
-successfully report races. The script may take between 30 minutes
+report races. The script may take between 30 minutes
 and 1 hour to validate all of the kernels.
 
 Command Line Arguments
@@ -156,25 +157,25 @@ Command Line Arguments
 
 Below is a summary of the command line flags that Weft supports.
 
- * <em>-b</em>: specify the CTA id to simulate (default 0x0x0)
- * <em>-d</em>: print detailed information when giving error output,
+ * `-b`: specify the CTA id to simulate (default 0x0x0)
+ * `-d`: print detailed information when giving error output,
                 including where threads are blocked for deadlock as
                 well as per-thread and per-address information for races
- * <em>-f</em>: specify the input PTX file (can be omitted if 
+ * `-f`: specify the input PTX file (can be omitted if 
                 the file is the last argument in the command line)
- * <em>-g</em>: specify the grid dimensions for the kernel being simulated
+ * `-g`: specify the grid dimensions for the kernel being simulated
                 (this argument can be omitted in most cases as many kernels
                 will not depend on these values)
- * <em>-i</em>: instrument the execution of Weft to report the
+ * `-i`: instrument the execution of Weft to report the
                 time taken and memory usage for each stage
- * <em>-n</em>: set the number of threads per CTA. This is required
+ * `-n`: set the number of threads per CTA. This is required
                 if the CUDA kernel did not have a 
                 <em>\_\_launch_bounds\_\_</em> annotation
- * <em>-s</em>: assume warp-synchronous execution when checking for races
- * <em>-t</em>: set the size of the thread pool for Weft to use; in
+ * `-s`: assume warp-synchronous execution when checking for races
+ * `-t`: set the size of the thread pool for Weft to use; in
                 general, Weft is memory bound, so one or two threads per socket
                 should be sufficient for achieving peak performance.
- * <em>-v</em>: enable verbose output
- * <em>-w</em>: enable warnings about PTX instructions that cannot be
+ * `-v`: enable verbose output
+ * `-w`: enable warnings about PTX instructions that cannot be
                 statically emulated (can result in large output)
 
