@@ -246,15 +246,17 @@ void Weft::report_usage(int error, const char *error_str)
   fprintf(stderr,"WEFT ERROR %d: %s!\nWEFT WILL NOW EXIT...\n", 
           error, error_str);
   fprintf(stderr,"Usage: Weft [args]\n");
-  fprintf(stderr,"  -b: specify the block id to simulate (default 0x0x0)\n");
+  fprintf(stderr,"  -b: specify the CTA id to simulate (default 0x0x0)\n");
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 0x0x1 or 1x2\n");
-  fprintf(stderr,"  -d: print detailed race information per-thread and per-address\n");
+  fprintf(stderr,"  -d: print detailed information for error reporting\n");
+  fprintf(stderr,"      this includes line numbers for blocked threads under deadlock and\n");
+  fprintf(stderr,"      and per-thread and per-address information for races\n");
   fprintf(stderr,"  -f: specify the input file\n");
   fprintf(stderr,"  -g: specify the grid dimensions for the kernel being simulated\n");
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 32x32x2 or 32x1\n");
   fprintf(stderr,"      Weft will still only simulate a single CTA specified by '-b'\n");
   fprintf(stderr,"  -i: instrument execution\n");
-  fprintf(stderr,"  -n: maximum number of threads per CTA\n");
+  fprintf(stderr,"  -n: number of threads per CTA\n");
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 64x2 or 32x8x1\n");
   fprintf(stderr,"  -s: assume warp-synchronous execution\n");
   fprintf(stderr,"  -t: thread pool size\n");
