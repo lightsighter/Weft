@@ -8,7 +8,7 @@ Synchronization in GPU Programs** will be appearing at
 [PLDI 2015](http://conf.researchr.org/home/pldi2015).
 
 Navigation
-===
+----
 
 1. [Overview](#overview)
 2. [Prerequisites](#prerequisites)
@@ -17,7 +17,7 @@ Navigation
 5. [Command Line Arguments](#command-line-arguments)
 
 Overview
-===
+----
 
 Weft is a sound and complete verification tool for warp-specialized 
 kernels that use named barriers on NVIDIA GPUs. Warp-specialized 
@@ -49,7 +49,7 @@ code as well for race freedom. The one caveat is that Weft currently
 does not attempt to check code that uses atomics.
 
 Prerequisites
-===
+----
 
 Weft requires an installation of the CUDA compiler for generating
 input PTX files. The CUDA toolkit can be downloaded 
@@ -60,7 +60,7 @@ Weft can be built with a standard C++ compiler. Weft has been tested
 with g++ and clang on both Linux and Mac systems.
 
 Downloading and Building Weft
-===
+----
 
 Weft is available on github under the Apache Software License
 version 2.0. To clone a copy of the Weft source type:
@@ -79,7 +79,7 @@ following command.
     $ export PATH=$PATH:/\<path\_to\_weft\>/src
 
 Using Weft
-===
+----
 
 Using Weft to validate a CUDA source file is straightforward.
 The first step is to use the CUDA compiler to generate a PTX
@@ -153,7 +153,7 @@ report races. The script may take between 30 minutes
 and 1 hour (depending on the machine) to validate all of the kernels.
 
 Command Line Arguments
-===
+----
 
 Below is a summary of the command line flags that Weft supports.
 
