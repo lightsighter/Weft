@@ -8,7 +8,7 @@ Synchronization in GPU Programs** will be appearing at
 [PLDI 2015](http://conf.researchr.org/home/pldi2015).
 
 Navigation
-====
+===
 
 1. [Overview](#overview)
 2. [Prerequisites](#prerequisites)
@@ -17,7 +17,7 @@ Navigation
 5. [Command Line Arguments](#command-line-arguments)
 
 Overview
-====
+===
 
 Weft is a sound and complete verification tool for warp-specialized 
 kernels that use named barriers on NVIDIA GPUs. Warp-specialized 
@@ -49,7 +49,7 @@ code as well for race freedom. The one caveat is that Weft currently
 does not attempt to check code that uses atomics.
 
 Prerequisites
-====
+===
 
 Weft requires an installation of the CUDA compiler for generating
 input PTX files. The CUDA toolkit can be downloaded 
@@ -60,7 +60,7 @@ Weft can be built with a standard C++ compiler. Weft has been tested
 with g++ and clang on both Linux and Mac systems.
 
 Downloading and Building Weft
-====
+===
 
 Weft is available on github under the Apache Software License
 version 2.0. To clone a copy of the Weft source type:
@@ -79,7 +79,7 @@ following command.
     $ export PATH=$PATH:/\<path\_to\_weft\>/src
 
 Using Weft
-====
+===
 
 Using Weft to validate a CUDA source file is straightforward.
 The first step is to use the CUDA compiler to generate a PTX
@@ -97,7 +97,7 @@ some cases, the flags for compute architecture (`-arch`) and
 machine size (`-m`) may need to be specified depending on the
 kernel being compiled. Below are the two ways that we invoke 
 the CUDA compiler on all of our example kernels for the
-Fermi and Kepler architectures respectively.
+Fermi and Kepler architectures respectively. Each of example
 
     $ nvcc -ptx -lineinfo -m64 -arch=compute\_20 source.cu
     $ nvcc -ptx -lineinfo -m64 -arch=compute\_35 source.cu
@@ -118,13 +118,13 @@ file contains has no `__launch_bounds__` declaration on its
 kernel, therefore we must tell Weft that the kernel requires CTAs
 contain 320 threads.
 
-    $ weft -n 320 saxpy\_single.ptx
+    $ weft -n 320 saxpy_single.ptx
 
 Note that the `-n` flag should also be used to specify multi-dimensional
 CTA shapes which cannot be captured by the `__launch_bounds__` 
 annotation. Both of the following are valid examples:
 
-    $ weft -n 320x1x1 saxpy\_single.ptx
+    $ weft -n 320x1x1 saxpy_single.ptx
     $ weft -n 16x16 dgemm.ptx
 
 Weft supports a large set of command line flags which we cover in
@@ -150,10 +150,10 @@ generating the PTX code for individual kernels. We also have a script
 called `run_examples.sh` in the main `examples` directory which will 
 validate all of the example kernels. Note that some kernels will 
 report races. The script may take between 30 minutes
-and 1 hour to validate all of the kernels.
+and 1 hour (depending on the machine) to validate all of the kernels.
 
 Command Line Arguments
-====
+===
 
 Below is a summary of the command line flags that Weft supports.
 
@@ -170,7 +170,7 @@ Below is a summary of the command line flags that Weft supports.
                 time taken and memory usage for each stage
  * `-n`: set the number of threads per CTA. This is required
                 if the CUDA kernel did not have a 
-                <em>\_\_launch_bounds\_\_</em> annotation
+                `__launch_bounds__` annotation
  * `-s`: assume warp-synchronous execution when checking for races
  * `-t`: set the size of the thread pool for Weft to use; in
                 general, Weft is memory bound, so one or two threads per socket
