@@ -3544,6 +3544,7 @@ gpu_viscosity(const double *temperature_array, const double *mass_frac_array,
       asm volatile("st.global.cs.f64 [%0], %1;" : : "l"(viscosity), "d"(accum) : 
         "memory"); 
     }
+    asm volatile("bar.sync 0;" : : : "memory");
   }
 }
 

@@ -36,7 +36,7 @@
 #endif
 
 #ifndef SGEMV_ITERS
-#define SGEMV_ITERS                     128
+#define SGEMV_ITERS                     64
 #endif
 
 __global__ void
