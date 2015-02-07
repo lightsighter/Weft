@@ -29,22 +29,22 @@ DYNAMICF_OUTPUTS:= $(FERMI_INPUTS:.cu=_dynamic.ptx)
 DYNAMICK_OUTPUTS:= $(KEPLER_INPUTS:.cu=_dynamic.ptx)
 
 %_fermi_small.ptx : %_fermi.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_20 -DTOTAL_STEPS=4 $<
+	nvcc -o $@ -ptx -m64 -lineinfo -arch=compute_20 -DTOTAL_STEPS=4 $<
 
 %_fermi_dynamic.ptx : %_fermi.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_20 -DDYNAMIC $<
+	nvcc -o $@ -ptx -m64 -lineinfo -arch=compute_20 -DDYNAMIC $<
 
 %_fermi.ptx : %_fermi.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_20 $<
+	nvcc -o $@ -ptx -m64 -lineinfo -arch=compute_20 $<
 
 %_kepler_small.ptx : %_kepler.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_35 -DTOTAL_STEPS=4 $<
+	nvcc -o $@ -ptx -m64 -lineinfo -arch=compute_35 -DTOTAL_STEPS=4 $<
 
 %_kepler_dynamic.ptx : %_kepler.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_35 -DDYNAMIC $<
+	nvcc -o $@ -ptx -m64 -lineinfo -arch=compute_35 -DDYNAMIC $<
 
 %_kepler.ptx : %_kepler.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_35 $<
+	nvcc -o $@ -ptx -m64 -lineinfo -arch=compute_35 $<
 
 
 .PHONY: all

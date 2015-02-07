@@ -19,10 +19,10 @@ OUTPUTS 	:= $(INPUTS:.cu=.ptx)
 SMALL_OUTPUTS	:= $(INPUTS:.cu=_small.ptx)
 
 %_small.ptx : %.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_20 -DNUM_ITERS=8 $<
+	nvcc -o $@ -ptx -lineinfo -m64 -arch=compute_20 -DNUM_ITERS=8 $<
 
 %.ptx : %.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_20 $<
+	nvcc -o $@ -ptx -lineinfo -m64 -arch=compute_20 $<
 
 .PHONY: all
 all: normal

@@ -25,13 +25,13 @@ SMALL_OUTPUTS	:= $(INPUTS:.cu=_small.ptx)
 DYNAMIC_OUTPUTS	:= $(INPUTS:.cu=_dynamic.ptx)
 
 %_small.ptx : %.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_35 -DRTM_ELMTS=16 $<
+	nvcc -o $@ -ptx -lineinfo -m64 -arch=compute_35 -DRTM_ELMTS=16 $<
 
 %_dynamic.ptx : %.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_35 -DDYNAMIC $<
+	nvcc -o $@ -ptx -lineinfo -m64 -arch=compute_35 -DDYNAMIC $<
 
 %.ptx : %.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_35 $<
+	nvcc -o $@ -ptx -lineinfo -m64 -arch=compute_35 $<
 
 .PHONY: all
 all: normal
