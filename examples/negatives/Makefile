@@ -18,7 +18,7 @@ INPUTS		:= arrival.cu deadlock.cu different.cu over.cu
 OUTPUTS 	:= $(INPUTS:.cu=.ptx)
 
 %.ptx : %.cu
-	nvcc -o $@ -ptx -m64 -arch=compute_20 $<
+	nvcc -o $@ -ptx -lineinfo -m64 -arch=compute_20 $<
 
 .PHONY: all
 all: normal
