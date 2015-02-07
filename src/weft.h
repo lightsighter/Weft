@@ -196,6 +196,7 @@ public:
   inline int thread_count(void) const { return max_num_threads; }
   inline int barrier_upper_bound(void) const { return max_num_barriers; }
   inline bool print_verbose(void) const { return verbose; }
+  inline bool print_detail(void) const { return detailed; }
   inline bool assume_warp_synchronous(void) const { return warp_synchronous; }
 protected:
   void parse_inputs(int argc, char **argv);
@@ -240,6 +241,7 @@ protected:
   int thread_pool_size;
   int max_num_barriers;
   bool verbose;
+  bool detailed;
   bool instrument;
   bool warnings;
   bool warp_synchronous;

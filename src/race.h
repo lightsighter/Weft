@@ -25,9 +25,11 @@
 #include <pthread.h>
 
 class Weft;
+class Thread;
 class WeftAccess;
 class WeftBarrier;
 class SharedMemory;
+class PTXInstruction;
 
 class Happens {
 public:
@@ -60,7 +62,8 @@ public:
 public:
   void add_access(WeftAccess *access);
   void perform_race_tests(void);
-  int report_races(void);
+  int report_races(std::map<
+      std::pair<PTXInstruction*,PTXInstruction*>,size_t> &all_races);
   size_t count_race_tests(void);
 protected:
   void record_race(WeftAccess *one, WeftAccess *two);
@@ -72,7 +75,8 @@ protected:
   std::vector<WeftAccess*> accesses;
 protected:
   int total_races;
-  std::set<std::pair<int,int> > ptx_races;
+  std::map<std::pair<PTXInstruction*,PTXInstruction*>,
+           std::set<std::pair<Thread*,Thread*> > > ptx_races;
 };
 
 class SharedMemory {

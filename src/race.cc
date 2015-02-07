@@ -165,23 +165,95 @@ void Address::record_race(WeftAccess *one, WeftAccess *two)
   int ptx_one = one->instruction->line_number;
   int ptx_two = two->instruction->line_number;
   if (ptx_one <= ptx_two)
-    ptx_races.insert(std::pair<int,int>(ptx_one, ptx_two));
+  {
+    std::pair<PTXInstruction*,PTXInstruction*> 
+                            key(one->instruction, two->instruction);
+    if (one->thread->thread_id <= two->thread->thread_id)
+      ptx_races[key].insert(
+          std::pair<Thread*,Thread*>(one->thread, two->thread));
+    else
+      ptx_races[key].insert(
+          std::pair<Thread*,Thread*>(two->thread, one->thread));
+  }
   else
-    ptx_races.insert(std::pair<int,int>(ptx_two, ptx_one));
+  {
+    std::pair<PTXInstruction*,PTXInstruction*> 
+                            key(two->instruction, one->instruction);
+    if (one->thread->thread_id <= two->thread->thread_id)
+      ptx_races[key].insert(
+          std::pair<Thread*,Thread*>(one->thread, two->thread));
+    else
+      ptx_races[key].insert(
+          std::pair<Thread*,Thread*>(two->thread, one->thread));
+  }
 }
 
-int Address::report_races(void)
+int Address::report_races(std::map<
+            std::pair<PTXInstruction*,PTXInstruction*>,size_t> &all_races)
 {
-  if ((total_races > 0) && memory->weft->print_verbose())
-  {
-    fprintf(stderr,"WEFT INFO: Found %d races on adress %d!\n",
-                    total_races, address);
-    for (std::set<std::pair<int,int> >::const_iterator it = 
-          ptx_races.begin(); it != ptx_races.end(); it++)
+  if (total_races > 0)
+  { 
+    if (memory->weft->print_detail())
     {
-      fprintf(stderr,"WEFT INFO: Race on address %d between "
-                      "PTX instructions on lines %d and %d\n",
-                      address, it->first, it->second);
+      fprintf(stderr,"WEFT INFO: Found %d races on adress %d!\n",
+                      total_races, address);
+      for (std::map<std::pair<PTXInstruction*,PTXInstruction*>,std::set<
+                    std::pair<Thread*,Thread*> > >::const_iterator it = 
+            ptx_races.begin(); it != ptx_races.end(); it++)
+      {
+        PTXInstruction *one = it->first.first;
+        PTXInstruction *two = it->first.second;
+        if (one->source_file != NULL)
+        {
+          assert(two->source_file != NULL);
+          if (one == two)
+            fprintf(stderr,"\tThere are %ld races between different threads "
+                  "on line %d of %s with address %d\n", it->second.size(),
+                  one->source_line_number, one->source_file, address);
+          else
+            fprintf(stderr,"\tThere are %ld races between line %d of %s "
+                    " and line %d of %s with address %d\n", it->second.size(),
+                    one->source_line_number, one->source_file,
+                    two->source_line_number, two->source_file, address);
+        }
+        else
+        {
+          assert(two->source_file == NULL);
+          if (one == two)
+            fprintf(stderr,"\tThere are %ld races between different threads "
+                   "on PTX line %d with address %d\n", it->second.size(),
+                   one->line_number, address);
+          else
+            fprintf(stderr,"\tThere are %ld races between PTX line %d "
+                    " and PTX line %d with address %d\n", it->second.size(),
+                    one->line_number, two->line_number, address);
+        }
+        const std::set<std::pair<Thread*,Thread*> > &threads = it->second;
+        for (std::set<std::pair<Thread*,Thread*> >::const_iterator 
+              thread_it = threads.begin(); 
+              thread_it != threads.end(); thread_it++)
+        {
+          Thread *first = thread_it->first;
+          Thread *second = thread_it->second;
+          fprintf(stderr,"\t\t... between thread (%d,%d,%d) and (%d,%d,%d)\n",
+                  first->tid_x, first->tid_y, first->tid_z,
+                  second->tid_x, second->tid_y, second->tid_z);
+        }
+      }
+    }
+    else
+    {
+      for (std::map<std::pair<PTXInstruction*,PTXInstruction*>,
+                    std::set<std::pair<Thread*,Thread*> > >::const_iterator
+            it = ptx_races.begin(); it != ptx_races.end(); it++)
+      {
+        std::map<std::pair<PTXInstruction*,PTXInstruction*>,size_t>::iterator
+          finder = all_races.find(it->first);
+        if (finder == all_races.end())
+          all_races[it->first] = it->second.size();
+        else
+          finder->second += it->second.size();
+      }
     }
   }
   return total_races;
@@ -247,20 +319,54 @@ void SharedMemory::enqueue_race_checks(void)
 void SharedMemory::check_for_races(void)
 {
   int total_races = 0;
+  std::map<std::pair<PTXInstruction*,PTXInstruction*>,size_t> all_races;
   for (std::map<int,Address*>::const_iterator it = 
         addresses.begin(); it != addresses.end(); it++)
   {
-    total_races += it->second->report_races();
+    total_races += it->second->report_races(all_races);
   }
   if (total_races > 0)
   {
-    fprintf(stderr,"WEFT INFO: RACES DETECTED!\n");
-    if (weft->print_verbose())
-      fprintf(stderr,"WEFT INFO: Found %d total races!\n", total_races);
-    else
+    if (!weft->print_detail())
+    {
+      for (std::map<std::pair<PTXInstruction*,PTXInstruction*>,size_t>::const_iterator 
+            it = all_races.begin(); it != all_races.end(); it++)
+      {
+        PTXInstruction *one = it->first.first;
+        PTXInstruction *two = it->first.second;
+        if (one->source_file != NULL)
+        {
+          assert(two->source_file != NULL);
+          if (one == two)
+            fprintf(stderr,"\tFound races between %ld pairs of "
+                           "threads on line %d of %s\n", it->second,
+                           one->source_line_number, one->source_file);
+          else
+            fprintf(stderr,"\tFound races between %ld pairs of threads "
+                           "on line %d of %s and line %d of %s\n", it->second,
+                           one->source_line_number, one->source_file,
+                           two->source_line_number, two->source_file);
+        }
+        else
+        {
+          assert(two->source_file == NULL);
+          if (one == two)
+            fprintf(stderr,"\tFound races between %ld pairs of "
+                           "threads on PTX line number %d\n",
+                           it->second, one->line_number);
+          else
+            fprintf(stderr,"\tFound races between %ld pairs of threads on "
+                           "PTX line %d and PTX line %d\n", it->second,
+                           one->line_number, two->line_number);
+        }
+      }
       fprintf(stderr,"WEFT INFO: Found %d total races!\n"
-                     "           Run in verbose mode to see line numbers\n",
-                      total_races);
+                     "           Run with '-d' flag to see detailed per-thread "
+                     "and per-address races\n", total_races);
+    }
+    else
+      fprintf(stderr,"WEFT INFO: Found %d total races!\n", total_races);
+    fprintf(stderr,"WEFT INFO: RACES DETECTED!\n");
   }
   else
     fprintf(stdout,"WEFT INFO: No races detected!\n");

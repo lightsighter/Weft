@@ -67,6 +67,10 @@ public:
 protected:
   void convert_to_instructions(int max_num_threads,
           const std::vector<std::pair<std::string,int> > &lines);
+  bool parse_file_location(const std::string &line,
+                           std::map<int,const char*> &source_files);
+  bool parse_source_location(const std::string &line,
+                             int &source_file, int &source_line);
 public:
   Weft *const weft;
 protected:

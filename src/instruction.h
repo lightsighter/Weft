@@ -140,6 +140,7 @@ public:
   inline PTXKind get_kind(void) const { return kind; }
 public:
   void set_next(PTXInstruction *next);
+  void set_source_location(const char *file, int line);
 public:
   static PTXInstruction* interpret(const std::string &line, int line_num);
   static const char* get_kind_name(PTXKind k);
@@ -151,6 +152,9 @@ public:
   const int line_number;
 protected:
   PTXInstruction *next;
+public:
+  const char *source_file;
+  int source_line_number;
 };
 
 class PTXLabel: public PTXInstruction {

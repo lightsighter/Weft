@@ -38,7 +38,7 @@
 Weft::Weft(int argc, char **argv)
   : file_name(NULL), max_num_threads(-1), 
     thread_pool_size(1), max_num_barriers(1),
-    verbose(false), instrument(false), 
+    verbose(false), detailed(false), instrument(false), 
     warnings(false), warp_synchronous(false),
     program(NULL), shared_memory(NULL), graph(NULL),
     worker_threads(NULL), pending_count(0)
@@ -111,6 +111,11 @@ void Weft::parse_inputs(int argc, char **argv)
       parse_triple(block, block_id, "-b", "CTA ID");
       continue;
     }
+    if (!strcmp(argv[i],"-d"))
+    {
+      detailed = true;
+      continue;
+    }
     if (!strcmp(argv[i],"-f"))
     {
       file_name = argv[++i];
@@ -174,8 +179,13 @@ void Weft::parse_inputs(int argc, char **argv)
     fprintf(stdout,"  File Name: %s\n", file_name);
     fprintf(stdout,"  CTA dimensions: (%d,%d,%d)\n", 
                       block_dim[0], block_dim[1], block_dim[2]);
+    fprintf(stdout,"  Block ID: (%d,%d,%d)\n",
+                      block_id[0], block_id[1], block_id[2]);
+    fprintf(stdout,"  Grid dimensions: (%d,%d,%d)\n",
+                      grid_dim[0], grid_dim[1], grid_dim[2]);
     fprintf(stdout,"  Thread Pool Size: %d\n", thread_pool_size);
     fprintf(stdout,"  Verbose: %s\n", (verbose ? "yes" : "no"));
+    fprintf(stdout,"  Detailed: %s\n", (detailed ? "yes" : "no"));
     fprintf(stdout,"  Instrument: %s\n", (instrument ? "yes" : "no"));
     fprintf(stdout,"  Report Warnings: %s\n", (warnings ? "yes" : "no"));
     fprintf(stdout,"  Warp-Synchronous Execution: %s\n", (warnings ? "yes" : "no"));
@@ -238,6 +248,7 @@ void Weft::report_usage(int error, const char *error_str)
   fprintf(stderr,"Usage: Weft [args]\n");
   fprintf(stderr,"  -b: specify the block id to simulate (default 0x0x0)\n");
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 0x0x1 or 1x2\n");
+  fprintf(stderr,"  -d: print detailed race information per-thread and per-address\n");
   fprintf(stderr,"  -f: specify the input file\n");
   fprintf(stderr,"  -g: specify the grid dimensions for the kernel being simulated\n");
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 32x32x2 or 32x1\n");
@@ -261,7 +272,11 @@ void Weft::parse_ptx(void)
     start_instrumentation(0/*stage*/);
   assert(program == NULL);
   program = new Program(this);
+  bool need_update = (max_num_threads == -1);
   program->parse_ptx_file(file_name, max_num_threads);
+  // If we didn't get a block size, make it Nx1x1
+  if (need_update)
+    block_dim[0] = max_num_threads;
   if (max_num_threads <= 0)
   {
     char buffer[1024];

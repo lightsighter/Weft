@@ -212,7 +212,8 @@ inline int64_t parse_immediate(const std::string &imm)
 }
 
 PTXInstruction::PTXInstruction(void)
-  : kind(PTX_LAST), line_number(0), next(NULL)
+  : kind(PTX_LAST), line_number(0), next(NULL),
+    source_file(NULL), source_line_number(-1)
 {
   // should never be called
   assert(false);
@@ -248,6 +249,12 @@ void PTXInstruction::set_next(PTXInstruction *n)
   assert(n != NULL);
   assert(next == NULL);
   next = n;
+}
+
+void PTXInstruction::set_source_location(const char *file, int line)
+{
+  source_file = file;
+  source_line_number = line;
 }
 
 /*static*/ 

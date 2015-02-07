@@ -72,6 +72,8 @@ void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
     {
       if (start_recording)
         lines.push_back(std::pair<std::string,int>(line,line_num));
+      if (line.find(".file") != std::string::npos)
+        lines.push_back(std::pair<std::string,int>(line,line_num));
       if (line.find(".entry") != std::string::npos)
       {
         // We should only have one entry kernel, we don't know
@@ -248,14 +250,29 @@ void Program::convert_to_instructions(int max_num_threads,
   // Make a first pass and create all the instructions
   // Track all the basic block program counters
   std::map<std::string,PTXLabel*> labels;
+  std::map<int,const char*> source_files;
   PTXInstruction *previous = NULL;
+  int current_source_file = -1;
+  int current_source_line = -1;
   for (std::vector<std::pair<std::string,int> >::const_iterator it = 
         lines.begin(); it != lines.end(); it++)
   {
+    // First see if it is a file or line number indicator
+    if (parse_file_location(it->first, source_files))
+      continue;
+    if (parse_source_location(it->first, current_source_file, current_source_line))
+      continue;
     PTXInstruction *next = PTXInstruction::interpret(it->first, it->second);
     // Skip any empty lines
     if (next == NULL)
       continue;
+    if (current_source_file >= 0)
+    {
+      std::map<int,const char*>::const_iterator finder = 
+        source_files.find(current_source_file);
+      assert(finder != source_files.end());
+      next->set_source_location(finder->second, current_source_line);
+    }
     ptx_instructions.push_back(next);
     if (next->is_label())
     {
@@ -266,6 +283,10 @@ void Program::convert_to_instructions(int max_num_threads,
       previous->set_next(next);
     previous = next;
   }
+  // If we didn't find a source file issue a warning
+  if (source_files.empty())
+    fprintf(stderr,"WEFT WARNING: No line information found! Line numbers from PTX "
+       "will be used!\n\t\tTry re-running nvcc with the '-lineinfo' flag!\n");
   // Then make a second pass to fill in the pointers
   for (std::vector<PTXInstruction*>::const_iterator it = 
         ptx_instructions.begin(); it != ptx_instructions.end(); it++)
@@ -281,6 +302,39 @@ void Program::convert_to_instructions(int max_num_threads,
       barrier->update_count(max_num_threads);
     }
   }
+}
+
+bool Program::parse_file_location(const std::string &line,
+                                  std::map<int,const char*> &source_files)
+{
+  if (line.find(".file") != std::string::npos)
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 5);
+    int file_id = atoi(tokens[1].c_str());
+    int end = tokens[2].find("\"",1); 
+    assert(source_files.find(file_id) == source_files.end());
+    source_files[file_id] = strdup(tokens[2].substr(1,end-1).c_str());
+    return true;
+  }
+  return false;
+}
+
+bool Program::parse_source_location(const std::string &line,
+                                    int &source_file, int &source_line)
+{
+  if ((line.find(".loc") != std::string::npos) &&
+      (line.find(".local") == std::string::npos))
+  {
+    std::vector<std::string> tokens;
+    split(tokens, line.c_str());
+    assert(tokens.size() == 4);
+    source_file = atoi(tokens[1].c_str());
+    source_line = atoi(tokens[2].c_str());
+    return true;
+  }
+  return false;
 }
 
 Thread::Thread(unsigned tid, int tidx, int tidy, int tidz,
