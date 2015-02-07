@@ -313,9 +313,10 @@ bool Program::parse_file_location(const std::string &line,
     split(tokens, line.c_str());
     assert(tokens.size() == 5);
     int file_id = atoi(tokens[1].c_str());
+    int start = tokens[2].find_last_of("/");
     int end = tokens[2].find("\"",1); 
     assert(source_files.find(file_id) == source_files.end());
-    source_files[file_id] = strdup(tokens[2].substr(1,end-1).c_str());
+    source_files[file_id] = strdup(tokens[2].substr(start+1,end-start-1).c_str());
     return true;
   }
   return false;

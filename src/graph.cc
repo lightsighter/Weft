@@ -494,7 +494,7 @@ void BarrierDependenceGraph::construct_graph(
   }
   if (has_deadlock)
   {
-    if (weft->print_verbose())
+    if (weft->print_detail())
     {
       report_state(program_counters, threads, pending_arrives);
       weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED! "
@@ -502,7 +502,7 @@ void BarrierDependenceGraph::construct_graph(
     }
     else
       weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED! "
-          "(run in verbose mode to see thread and barrier state)");
+          "(run in detailed mode with '-d' to see thread and barrier state)");
   }
   else
     fprintf(stdout,"WEFT INFO: No deadlocks detected!\n");
@@ -839,8 +839,13 @@ void BarrierDependenceGraph::report_state(
     {
       assert(inst->is_sync());
       BarrierSync *sync = inst->as_sync();
-      fprintf(stderr,"  Thread %d: Blocked on barrier %d (PTX line %d)\n", 
-                      idx, sync->name, sync->instruction->line_number);
+      if (sync->instruction->source_file == NULL)
+        fprintf(stderr,"  Thread %d: Blocked on barrier %d (PTX line %d)\n", 
+                        idx, sync->name, sync->instruction->line_number);
+      else
+        fprintf(stderr,"  Thread %d: Blocked on barrier %d (on line %d of %s)\n",
+                        idx, sync->name, sync->instruction->source_line_number, 
+                        sync->instruction->source_file);
     }
     else
       fprintf(stderr,"  Thread %d: Exited\n", idx);
