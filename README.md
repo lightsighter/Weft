@@ -166,7 +166,9 @@ Below is a summary of the command line flags that Weft supports.
                 the file is the last argument in the command line)
  * `-g`: specify the grid dimensions for the kernel being simulated
                 (this argument can be omitted in most cases as many kernels
-                will not depend on these values)
+                will not depend on these values; regardless of the grid
+                bounds Weft will always validate a single CTA specified
+                by the `-b` flag)
  * `-i`: instrument the execution of Weft to report the
                 time taken and memory usage for each stage
  * `-n`: set the number of threads per CTA. This is required
