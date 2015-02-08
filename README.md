@@ -107,7 +107,7 @@ can either be specified to Weft using the `-f` flag or as the
 last argument.
 
     $ weft -f source.ptx -s -t 4
-    $ weft source.ptx
+    $ weft -s -t 4 source.ptx
 
 As part of its validation, Weft needs to know how many threads
 are in each CTA. For kernels with 1-D CTAs, Weft can infer this
