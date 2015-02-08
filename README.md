@@ -99,8 +99,8 @@ kernel being compiled. Below are the two ways that we invoke
 the CUDA compiler on all of our example kernels for the
 Fermi and Kepler architectures respectively.
 
-    $ nvcc -ptx -lineinfo -m64 -arch=compute\_20 source.cu
-    $ nvcc -ptx -lineinfo -m64 -arch=compute\_35 source.cu
+    $ nvcc -ptx -lineinfo -m64 -arch=compute_20 source.cu
+    $ nvcc -ptx -lineinfo -m64 -arch=compute_35 source.cu
 
 The resulting PTX file is the input to Weft. The PTX file name
 can either be specified to Weft using the `-f` flag or as the
