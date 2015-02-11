@@ -174,6 +174,8 @@ Below is a summary of the command line flags that Weft supports.
  * `-n`: set the number of threads per CTA. This is required
                 if the CUDA kernel did not have a 
                 `__launch_bounds__` annotation
+ * `-p`: print out individual files for each thread of all Weft modeled 
+                instructions, this will generate one file per thread
  * `-s`: assume warp-synchronous execution when checking for races
  * `-t`: set the size of the thread pool for Weft to use; in
                 general, Weft is memory bound, so one or two threads per socket

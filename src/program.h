@@ -117,6 +117,7 @@ public:
 public:
   void profile_instruction(PTXInstruction *instruction);
   int accumulate_instruction_counts(std::vector<int> &total_counts);
+  void dump_weft_thread(void);
 public:
   void update_shared_memory(WeftAccess *access);
 public:

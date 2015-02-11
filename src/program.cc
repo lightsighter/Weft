@@ -537,6 +537,29 @@ int Thread::accumulate_instruction_counts(std::vector<int> &total_counts)
   return total;
 }
 
+void Thread::dump_weft_thread(void)
+{
+  // Open up a file for this thread and then 
+  // print out all of our weft instructions
+  char file_name[1024];
+  program->weft->get_file_prefix(file_name, 1024-32);
+  char buffer[32];
+  snprintf(buffer, 31, "_%d_%d_%d.weft", tid_x, tid_y, tid_z);
+  strncat(file_name, buffer, 31);
+  FILE *weft_file = fopen(file_name, "w");
+  if (weft_file == NULL)
+  {
+    fprintf(stderr, "WEFT WARNING: Failed to open file %s\n", file_name);
+    return ;
+  }
+  for (std::vector<WeftInstruction*>::const_iterator it = 
+        instructions.begin(); it != instructions.end(); it++)
+  {
+    (*it)->print_instruction(weft_file);
+  }
+  assert(fclose(weft_file) == 0);
+}
+
 void Thread::update_shared_memory(WeftAccess *access)
 {
   shared_memory->update_accesses(access);
@@ -698,5 +721,15 @@ UpdateThreadTask::UpdateThreadTask(Thread *t)
 void UpdateThreadTask::execute(void)
 {
   thread->update_happens_relationships();
+}
+
+DumpThreadTask::DumpThreadTask(Thread *t)
+  : WeftTask(), thread(t)
+{
+}
+
+void DumpThreadTask::execute(void)
+{
+  thread->dump_weft_thread();
 }
 

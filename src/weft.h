@@ -182,7 +182,21 @@ public:
 public:
   virtual void execute(void);
 public:
-  Address *address;
+  Address *const address;
+};
+
+class DumpThreadTask : public WeftTask {
+public:
+  DumpThreadTask(Thread *thread);
+  DumpThreadTask(const DumpThreadTask &rhs) : thread(NULL) { assert(false); }
+  virtual ~DumpThreadTask(void) { }
+public:
+  DumpThreadTask& operator=(const DumpThreadTask &rhs)
+    { assert(false); return *this; }
+public:
+  virtual void execute(void);
+public:
+  Thread *const thread;
 };
 
 class Weft {
@@ -215,6 +229,7 @@ public:
   void fill_block_dim(int *array);
   void fill_block_id(int *array);
   void fill_grid_dim(int *array);
+  void get_file_prefix(char *buffer, size_t count);
 protected:
   void start_threadpool(void);
   void stop_threadpool(void);
@@ -245,6 +260,7 @@ protected:
   bool instrument;
   bool warnings;
   bool warp_synchronous;
+  bool print_files;
 protected:
   Program *program;
   std::vector<Thread*> threads;

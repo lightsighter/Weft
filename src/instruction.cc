@@ -2416,9 +2416,19 @@ BarrierSync::BarrierSync(int n, int c, PTXBarrier *bar, Thread *thread)
 { 
 }
 
+void BarrierSync::print_instruction(FILE *target)
+{
+  fprintf(target,"bar.sync %d, %d;\n", name, count);
+}
+
 BarrierArrive::BarrierArrive(int n, int c, PTXBarrier *bar, Thread *thread)
   : WeftBarrier(n, c, bar, thread)
 {
+}
+
+void BarrierArrive::print_instruction(FILE *target)
+{
+  fprintf(target,"bar.arrive %d, %d;\n", name, count);
 }
 
 WeftAccess::WeftAccess(int addr, PTXSharedAccess *acc, 
@@ -2464,9 +2474,19 @@ SharedWrite::SharedWrite(int addr, PTXSharedAccess *acc,
 {
 }
 
+void SharedWrite::print_instruction(FILE *target)
+{
+  fprintf(target,"write shared[%d];\n", address);
+}
+
 SharedRead::SharedRead(int addr, PTXSharedAccess *acc, 
                        Thread *thread, int acc_id /*=-1*/)
   : WeftAccess(addr, acc, thread, acc_id)
 {
+}
+
+void SharedRead::print_instruction(FILE *target)
+{
+  fprintf(target,"read shared[%d];\n", address);
 }
 

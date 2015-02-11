@@ -39,7 +39,7 @@ Weft::Weft(int argc, char **argv)
   : file_name(NULL), max_num_threads(-1), 
     thread_pool_size(1), max_num_barriers(1),
     verbose(false), detailed(false), instrument(false), 
-    warnings(false), warp_synchronous(false),
+    warnings(false), warp_synchronous(false), print_files(false),
     program(NULL), shared_memory(NULL), graph(NULL),
     worker_threads(NULL), pending_count(0)
 {
@@ -132,6 +132,11 @@ void Weft::parse_inputs(int argc, char **argv)
       instrument = true;
       continue;
     }
+    if (!strcmp(argv[i],"-p"))
+    {
+      print_files = true;
+      continue;
+    }
     if (!strcmp(argv[i],"-n"))
     {
       std::string threads(argv[++i]);
@@ -189,6 +194,7 @@ void Weft::parse_inputs(int argc, char **argv)
     fprintf(stdout,"  Instrument: %s\n", (instrument ? "yes" : "no"));
     fprintf(stdout,"  Report Warnings: %s\n", (warnings ? "yes" : "no"));
     fprintf(stdout,"  Warp-Synchronous Execution: %s\n", (warnings ? "yes" : "no"));
+    fprintf(stdout,"  Dump Weft thread files: %s\n", (print_files ? "yes" : "no"));
   }
 }
 
@@ -256,6 +262,7 @@ void Weft::report_usage(int error, const char *error_str)
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 32x32x2 or 32x1\n");
   fprintf(stderr,"      Weft will still only simulate a single CTA specified by '-b'\n");
   fprintf(stderr,"  -i: instrument execution\n");
+  fprintf(stderr,"  -p: print individual Weft thread files (one file per thread!)\n");
   fprintf(stderr,"  -n: number of threads per CTA\n");
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 64x2 or 32x8x1\n");
   fprintf(stderr,"  -s: assume warp-synchronous execution\n");
@@ -378,6 +385,20 @@ void Weft::emulate_threads(void)
 
   if (instrument)
     stop_instrumentation(1/*stage*/);
+
+  // If we want to dump thread-specific files, do that now
+  // Note that we don't include this in the timing
+  if (print_files)
+  {
+    initialize_count(max_num_threads);
+    for (std::vector<Thread*>::const_iterator it = threads.begin();
+          it != threads.end(); it++)
+    {
+      DumpThreadTask *dump_task = new DumpThreadTask(*it); 
+      enqueue_task(dump_task);
+    }
+    wait_until_done();
+  }
 }
 
 void Weft::construct_dependence_graph(void)
@@ -520,6 +541,14 @@ void Weft::fill_grid_dim(int *array)
 {
   for (int i = 0; i < 3; i++)
     array[i] = grid_dim[i];
+}
+
+void Weft::get_file_prefix(char *buffer, size_t count)
+{
+  std::string full_name(file_name);
+  assert(full_name.find(".ptx") != std::string::npos);
+  std::string base = full_name.substr(0, full_name.find(".ptx"));
+  strncpy(buffer, base.c_str(), count);
 }
 
 void Weft::start_threadpool(void)

@@ -726,6 +726,8 @@ public:
   void initialize_happens(Happens *happens);
   inline Happens* get_happens(void) const { return happens_relationship; }
 public:
+  virtual void print_instruction(FILE *target) = 0;
+public:
   PTXInstruction *const instruction;
   Thread *const thread;
   const int thread_line_number;
@@ -748,6 +750,8 @@ public:
   void set_instance(BarrierInstance *instance);
   inline BarrierInstance* get_instance(void) const { return instance; }
 public:
+  virtual void print_instruction(FILE *target) = 0;
+public:
   const int name;
   const int count;
   PTXBarrier *const barrier;
@@ -766,6 +770,7 @@ public:
 public:
   virtual bool is_sync(void) const { return true; }
   virtual BarrierSync* as_sync(void) { return this; }
+  virtual void print_instruction(FILE *target);
 };
 
 class BarrierArrive : public WeftBarrier {
@@ -779,6 +784,7 @@ public:
 public:
   virtual bool is_arrive(void) const { return true; }
   virtual BarrierArrive* as_arrive(void) { return this; }
+  virtual void print_instruction(FILE *target);
 };
 
 class WeftAccess : public WeftInstruction {
@@ -795,6 +801,8 @@ public:
 public:
   bool has_happens_relationship(WeftAccess *other);
   bool is_warp_synchronous(WeftAccess *other);
+public:
+  virtual void print_instruction(FILE *target) = 0;
 public:
   const int address;
   PTXSharedAccess *const access;
@@ -813,6 +821,7 @@ public:
 public:
   virtual bool is_write(void) const { return true; }
   virtual SharedWrite* as_write(void) { return this; }
+  virtual void print_instruction(FILE *target);
 };
 
 class SharedRead : public WeftAccess {
@@ -827,6 +836,7 @@ public:
 public:
   virtual bool is_read(void) const { return true; }
   virtual SharedRead* as_read(void) { return this; }
+  virtual void print_instruction(FILE *target);
 };
 
 #endif // __INSTRUCTION_H__
