@@ -132,17 +132,17 @@ void Weft::parse_inputs(int argc, char **argv)
       instrument = true;
       continue;
     }
-    if (!strcmp(argv[i],"-p"))
-    {
-      print_files = true;
-      continue;
-    }
     if (!strcmp(argv[i],"-n"))
     {
       std::string threads(argv[++i]);
       // If we succeeded, compute the max number of threads
       if (parse_triple(threads, block_dim, "-n", "CTA size"))
         max_num_threads = block_dim[0] * block_dim[1] * block_dim[2];
+      continue;
+    }
+    if (!strcmp(argv[i],"-p"))
+    {
+      print_files = true;
       continue;
     }
     if (!strcmp(argv[i],"-s"))
@@ -262,9 +262,9 @@ void Weft::report_usage(int error, const char *error_str)
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 32x32x2 or 32x1\n");
   fprintf(stderr,"      Weft will still only simulate a single CTA specified by '-b'\n");
   fprintf(stderr,"  -i: instrument execution\n");
-  fprintf(stderr,"  -p: print individual Weft thread files (one file per thread!)\n");
   fprintf(stderr,"  -n: number of threads per CTA\n");
   fprintf(stderr,"      can be an integer or an x-separated tuple e.g. 64x2 or 32x8x1\n");
+  fprintf(stderr,"  -p: print individual Weft thread files (one file per thread!)\n");
   fprintf(stderr,"  -s: assume warp-synchronous execution\n");
   fprintf(stderr,"  -t: thread pool size\n");
   fprintf(stderr,"  -v: print verbose output\n");
