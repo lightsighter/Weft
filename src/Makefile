@@ -21,7 +21,12 @@ all: $(OUTFILE)
 
 GCC = g++
 CC_FLAGS = -O2 -Wall
-LD_FLAGS = -O2 -lpthread
+LD_FLAGS = -O2 -lpthread 
+
+UNAME = $(shell uname)
+ifeq ($(UNAME),Linux)
+LD_FLAGS += -lrt
+endif
 
 FILES = weft.cc \
 	race.cc \
