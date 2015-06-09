@@ -54,7 +54,7 @@ Prerequisites
 Weft requires an installation of the CUDA compiler for generating
 input PTX files. The CUDA toolkit can be downloaded 
 [here](https://developer.nvidia.com/cuda-downloads). Weft requires
-CUDA version 5.0 or later.
+CUDA version 5.5 or later.
 
 Weft can be built with a standard C++ compiler. Weft has been tested
 with g++ and clang on both Linux and Mac systems.
