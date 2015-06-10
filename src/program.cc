@@ -61,6 +61,7 @@ void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
 {
   std::ifstream file(file_name);
   std::vector<std::pair<std::string,int> > lines;
+  std::map<int,const char*> source_files;
   // First, let's get all the lines we care about
   if (file.is_open())
   {
@@ -68,12 +69,13 @@ void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
     bool found = false;
     std::string line;
     int line_num = 1;
-    while (std::getline(file, line))
+    std::getline(file, line);
+    while (!file.eof())
     {
       if (start_recording)
         lines.push_back(std::pair<std::string,int>(line,line_num));
-      if (line.find(".file") != std::string::npos)
-        lines.push_back(std::pair<std::string,int>(line,line_num));
+      // Try parsing this as a file location
+      parse_file_location(line, source_files);
       if (line.find(".entry") != std::string::npos)
       {
         // We should only have one entry kernel, we don't know
@@ -83,7 +85,7 @@ void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
           char buffer[1024];
           snprintf(buffer, 1023, "Found multiple entry kernels in file %s. "
                                  "Weft currently only supports one kernel "
-                                 "per file.", file_name);
+                                 "per file", file_name);
           weft->report_error(WEFT_ERROR_MULTIPLE_KERNELS, buffer);
         }
         start_recording = true;
@@ -106,7 +108,19 @@ void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
           max_num_threads = temp;
         found = true;
       }
+      if (line.find(".version") != std::string::npos)
+      {
+        double version = atof(line.substr(line.find(" ")).c_str());
+        if (version < 3.2)
+        {
+          char buffer[1024];
+          snprintf(buffer,1023, "Weft requires PTX version 3.2 (CUDA 5.5) or later! "
+                    "File %s contains PTX version %g", file_name, version);
+          weft->report_error(WEFT_ERROR_INVALID_PTX_VERSION, buffer);
+        }
+      }
       line_num++;
+      std::getline(file, line);
     }
   }
   else
@@ -115,8 +129,12 @@ void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
     snprintf(buffer, 1023, "Unable to open file %s", file_name);
     weft->report_error(WEFT_ERROR_FILE_OPEN, buffer);
   }
+  // If we didn't find a source file issue a warning
+  if (source_files.empty())
+    fprintf(stderr,"WEFT WARNING: No line information found! Line numbers from PTX "
+       "will be used!\n\t\tTry re-running nvcc with the '-lineinfo' flag!\n");
   // Once we have the lines, then convert them into static PTX instructions
-  convert_to_instructions(max_num_threads, lines);
+  convert_to_instructions(max_num_threads, lines, source_files);
 }
 
 void Program::report_statistics(void)
@@ -245,21 +263,18 @@ void Program::emulate_warp(Thread **threads)
 }
 
 void Program::convert_to_instructions(int max_num_threads,
-                const std::vector<std::pair<std::string,int> > &lines)
+                const std::vector<std::pair<std::string,int> > &lines,
+                const std::map<int,const char*> &source_files)
 {
   // Make a first pass and create all the instructions
   // Track all the basic block program counters
   std::map<std::string,PTXLabel*> labels;
-  std::map<int,const char*> source_files;
   PTXInstruction *previous = NULL;
   int current_source_file = -1;
   int current_source_line = -1;
   for (std::vector<std::pair<std::string,int> >::const_iterator it = 
         lines.begin(); it != lines.end(); it++)
   {
-    // First see if it is a file or line number indicator
-    if (parse_file_location(it->first, source_files))
-      continue;
     if (parse_source_location(it->first, current_source_file, current_source_line))
       continue;
     PTXInstruction *next = PTXInstruction::interpret(it->first, it->second);
@@ -282,11 +297,7 @@ void Program::convert_to_instructions(int max_num_threads,
     if (previous != NULL)
       previous->set_next(next);
     previous = next;
-  }
-  // If we didn't find a source file issue a warning
-  if (source_files.empty())
-    fprintf(stderr,"WEFT WARNING: No line information found! Line numbers from PTX "
-       "will be used!\n\t\tTry re-running nvcc with the '-lineinfo' flag!\n");
+  } 
   // Then make a second pass to fill in the pointers
   for (std::vector<PTXInstruction*>::const_iterator it = 
         ptx_instructions.begin(); it != ptx_instructions.end(); it++)

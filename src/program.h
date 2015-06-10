@@ -66,7 +66,8 @@ public:
   void emulate_warp(Thread **threads);
 protected:
   void convert_to_instructions(int max_num_threads,
-          const std::vector<std::pair<std::string,int> > &lines);
+          const std::vector<std::pair<std::string,int> > &lines,
+          const std::map<int,const char*> &source_files);
   bool parse_file_location(const std::string &line,
                            std::map<int,const char*> &source_files);
   bool parse_source_location(const std::string &line,
