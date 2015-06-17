@@ -118,7 +118,7 @@ private:
     std::deque<BarrierInstance*> previous;
   };
 public:
-  BarrierDependenceGraph(Weft *weft);
+  BarrierDependenceGraph(Weft *weft, Program *p);
   BarrierDependenceGraph(const BarrierDependenceGraph &rhs);
   ~BarrierDependenceGraph(void);
 public:
@@ -150,6 +150,7 @@ protected:
   void initialize_pending_counts(void);
 public:
   Weft *const weft;
+  Program *const program;
   const int max_num_barriers;
 protected:
   std::vector<std::deque<BarrierInstance*> > barrier_instances;

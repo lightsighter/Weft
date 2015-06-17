@@ -86,7 +86,7 @@ void Address::add_access(WeftAccess *access)
 
 void Address::perform_race_tests(void)
 {
-  if (memory->weft->assume_warp_synchronous())
+  if (memory->program->assume_warp_synchronous())
   {
     for (unsigned idx1 = 0; idx1 < accesses.size(); idx1++)
     {
@@ -195,7 +195,7 @@ int Address::report_races(std::map<
   { 
     if (memory->weft->print_detail())
     {
-      fprintf(stderr,"WEFT INFO: Found %d races on adress %d!\n",
+      fprintf(stderr,"WEFT INFO: Found %d races on address %d!\n",
                       total_races, address);
       for (std::map<std::pair<PTXInstruction*,PTXInstruction*>,std::set<
                     std::pair<Thread*,Thread*> > >::const_iterator it = 
@@ -267,8 +267,8 @@ size_t Address::count_race_tests(void)
   return ((num_accesses * (num_accesses-1))/2);
 }
 
-SharedMemory::SharedMemory(Weft *w)
-  : weft(w)
+SharedMemory::SharedMemory(Weft *w, Program *p)
+  : weft(w), program(p)
 {
   PTHREAD_SAFE_CALL( pthread_mutex_init(&memory_lock,NULL) );
 }
@@ -360,16 +360,19 @@ void SharedMemory::check_for_races(void)
                            one->line_number, two->line_number);
         }
       }
-      fprintf(stderr,"WEFT INFO: Found %d total races!\n"
+      fprintf(stderr,"WEFT INFO: Found %d total races in kernel %s!\n"
                      "           Run with '-d' flag to see detailed per-thread "
-                     "and per-address races\n", total_races);
+                     "and per-address races\n", total_races, program->get_name());
     }
     else
-      fprintf(stderr,"WEFT INFO: Found %d total races!\n", total_races);
-    fprintf(stderr,"WEFT INFO: RACES DETECTED!\n");
+      fprintf(stderr,"WEFT INFO: Found %d total races in kernel %s!\n", 
+                     total_races, program->get_name());
+    fprintf(stderr,"WEFT INFO: RACES DETECTED IN KERNEL %s!\n", 
+                     program->get_name());
   }
   else
-    fprintf(stdout,"WEFT INFO: No races detected!\n");
+    fprintf(stdout,"WEFT INFO: No races detected in kernel %s!\n", 
+                    program->get_name());
 }
 
 size_t SharedMemory::count_race_tests(void)

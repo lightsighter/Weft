@@ -30,6 +30,14 @@ enum ThreadStatus {
   THREAD_EXITTED,
 };
 
+enum ProgramStage {
+  EMULATE_THREADS_STAGE,
+  CONSTRUCT_BARRIER_GRAPH_STAGE,
+  COMPUTE_HAPPENS_RELATIONSHIP_STAGE,
+  CHECK_FOR_RACES_STAGE,
+  TOTAL_STAGES,
+};
+
 class Weft;
 class Thread;
 class Happens;
@@ -50,32 +58,74 @@ public:
 
 class Program {
 public:
-  Program(Weft *weft);
+  Program(Weft *weft, std::string &kernel_name);
   Program(const Program &rhs);
   ~Program(void);
 public:
   Program& operator=(const Program &rhs);
 public:
-  void parse_ptx_file(const char *file_name, int &max_num_threads);
+  static void parse_ptx_file(const char *file_name, Weft *weft,
+                             std::vector<Program*> &programs);
   void report_statistics(void);
   void report_statistics(const std::vector<Thread*> &threads);
   bool has_shuffles(void) const;
   inline int count_instructions(void) const { return ptx_instructions.size(); }
+  inline int barrier_upper_bound(void) const { return max_num_barriers; }
+  inline int thread_count(void) const { return max_num_threads; }
+  inline bool assume_warp_synchronous(void) const { return warp_synchronous; }
+  inline const char* get_name(void) const { return kernel_name.c_str(); }
+public:
+  void emulate_threads(void);
+  void construct_dependence_graph(void);
+  void compute_happens_relationships(void);
+  void check_for_race_conditions(void);
+  void print_statistics(void);
+  void print_files(void);
+  int count_dynamic_instructions(void);
+  int count_weft_statements(void);
 public:
   int emulate(Thread *thread);
   void emulate_warp(Thread **threads);
+  void get_kernel_prefix(char *buffer, size_t count);
+public:
+  void add_line(const std::string &line, int line_num);
+  void set_block_dim(int *array);
+  void fill_block_dim(int *array) const;
+  void fill_block_id(int *array) const;
+  void fill_grid_dim(int *array) const;
 protected:
-  void convert_to_instructions(int max_num_threads,
-          const std::vector<std::pair<std::string,int> > &lines,
-          const std::map<int,const char*> &source_files);
-  bool parse_file_location(const std::string &line,
-                           std::map<int,const char*> &source_files);
-  bool parse_source_location(const std::string &line,
-                             int &source_file, int &source_line);
+  void convert_to_instructions(const std::map<int,const char*> &source_files);
+  static bool parse_file_location(const std::string &line,
+                                  std::map<int,const char*> &source_files);
+  static bool parse_source_location(const std::string &line,
+                                    int &source_file, int &source_line);
+protected:
+  void start_instrumentation(ProgramStage stage);
+  void stop_instrumentation(ProgramStage stage);
+public:
+  void report_instrumentation(size_t &accumulated_memory);
 public:
   Weft *const weft;
 protected:
+  std::string kernel_name;
+  int max_num_threads;
+  int max_num_barriers;
   std::vector<PTXInstruction*> ptx_instructions;
+  std::vector<Thread*> threads;
+  SharedMemory *shared_memory;
+protected:
+  int block_dim[3];
+  int block_id[3];
+  int grid_dim[3];
+  bool warp_synchronous;
+protected:
+  BarrierDependenceGraph *graph;
+protected:
+  std::vector<std::pair<std::string,int> > lines;
+protected:
+  // Instrumentation
+  unsigned long long timing[TOTAL_STAGES];
+  size_t memory_usage[TOTAL_STAGES];
 };
 
 class Thread {

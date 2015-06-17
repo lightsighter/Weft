@@ -282,7 +282,7 @@ void BarrierInstance::compute_transitivity(Weft *weft, bool forward)
   // Then do the transitive update
   if (forward)
   {
-    latest_before.resize(graph->weft->thread_count(), -1);
+    latest_before.resize(graph->program->thread_count(), -1);
     for (std::vector<WeftBarrier*>::const_iterator it = 
           participants.begin(); it != participants.end(); it++)
     {
@@ -299,7 +299,7 @@ void BarrierInstance::compute_transitivity(Weft *weft, bool forward)
   }
   else
   {
-    earliest_after.resize(graph->weft->thread_count(), -1);
+    earliest_after.resize(graph->program->thread_count(), -1);
     for (std::vector<WeftBarrier*>::const_iterator it = 
           participants.begin(); it != participants.end(); it++)
     {
@@ -438,8 +438,8 @@ void BarrierDependenceGraph::PreceedingBarriers::add_instance(
   next->update_waiting_threads(arrival_threads);
 }
 
-BarrierDependenceGraph::BarrierDependenceGraph(Weft *w)
-  : weft(w), max_num_barriers(w->barrier_upper_bound())
+BarrierDependenceGraph::BarrierDependenceGraph(Weft *w, Program *p)
+  : weft(w), program(p), max_num_barriers(p->barrier_upper_bound())
 {
   barrier_instances.resize(max_num_barriers);
   PTHREAD_SAFE_CALL( pthread_mutex_init(&validation_mutex, NULL) );
@@ -447,7 +447,7 @@ BarrierDependenceGraph::BarrierDependenceGraph(Weft *w)
 
 BarrierDependenceGraph::BarrierDependenceGraph(
                         const BarrierDependenceGraph &rhs)
-  : weft(NULL), max_num_barriers(0)
+  : weft(NULL), program(NULL), max_num_barriers(0)
 {
   assert(false);
 }
@@ -496,19 +496,28 @@ void BarrierDependenceGraph::construct_graph(
   {
     if (weft->print_detail())
     {
+      char buffer[1024];
+      snprintf(buffer, 1023, "DEADLOCK DETECTED IN KERNEL %s! "
+                      "(thread and barrier state reported above)",
+                      program->get_name());
       report_state(program_counters, threads, pending_arrives);
-      weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED! "
-                      "(thread and barrier state reported above)");
+      weft->report_error(WEFT_ERROR_DEADLOCK, buffer);
     }
     else
-      weft->report_error(WEFT_ERROR_DEADLOCK, "DEADLOCK DETECTED! "
-          "(run in detailed mode with '-d' to see thread and barrier state)");
+    {
+      char buffer[1024];
+      snprintf(buffer, 1023, "DEADLOCK DETECTED IN KERNEL %s! "
+          "(run in detailed mode with '-d' to see thread and barrier state)",
+          program->get_name());
+      weft->report_error(WEFT_ERROR_DEADLOCK, buffer);
+    }
   }
   else
-    fprintf(stdout,"WEFT INFO: No deadlocks detected!\n");
+    fprintf(stdout,"WEFT INFO: No deadlocks detected in kernel %s!\n",
+            program->get_name());
   if (weft->print_verbose())
-    fprintf(stdout,"WEFT INFO: Total barrier instances: %ld\n",
-            all_barriers.size());
+    fprintf(stdout,"WEFT INFO: Total barrier instances in kernel %s: %ld\n",
+            program->get_name(), all_barriers.size());
 }
 
 int BarrierDependenceGraph::count_validation_tasks(void)
@@ -547,7 +556,8 @@ void BarrierDependenceGraph::check_for_validation_errors(void)
   // threadpool when we invokee this method
   if (!failed_validations.empty())
   {
-    fprintf(stderr, "WEFT INFO: BARRIERS NOT PROPERLY RECYCLED!\n");
+    fprintf(stderr, "WEFT INFO: BARRIERS NOT PROPERLY RECYCLED "
+                    "IN KERNEL %s!\n", program->get_name());
     for (std::vector<std::pair<int,int> >::const_iterator it = 
           failed_validations.begin(); it != failed_validations.end(); it++)
     {
@@ -562,7 +572,8 @@ void BarrierDependenceGraph::check_for_validation_errors(void)
     weft->report_error(WEFT_ERROR_GRAPH_VALIDATION, buffer);
   }
   else
-    fprintf(stdout,"WEFT INFO: Barriers properly recycled!\n");
+    fprintf(stdout,"WEFT INFO: Barriers properly recycled in kernel %s!\n",
+            program->get_name());
 }
 
 void BarrierDependenceGraph::validate_barrier(int name, int generation)

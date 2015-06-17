@@ -16,6 +16,7 @@
 
 #include "weft.h"
 #include "race.h"
+#include "graph.h"
 #include "program.h"
 #include "instruction.h"
 
@@ -27,10 +28,16 @@
 #include <cstring>
 #include <cassert>
 #include <cstdlib>
+#include <cxxabi.h> // Demangling
 
-Program::Program(Weft *w)
-  : weft(w)
+Program::Program(Weft *w, std::string &name)
+  : weft(w), kernel_name(name), 
+    max_num_threads(-1), max_num_barriers(1),
+    shared_memory(NULL), graph(NULL)
 {
+  // Initialize values
+  weft->initialize_program(block_dim, block_id, grid_dim, warp_synchronous);
+  max_num_threads = block_dim[0] * block_dim[1] * block_dim[2];
 }
 
 Program::Program(const Program &rhs)
@@ -48,6 +55,22 @@ Program::~Program(void)
     delete (*it);
   }
   ptx_instructions.clear();
+  if (shared_memory != NULL)
+  {
+    delete shared_memory;
+    shared_memory = NULL;
+  }
+  if (graph != NULL)
+  {
+    delete graph;
+    graph = NULL;
+  }
+  for (std::vector<Thread*>::iterator it = threads.begin();
+        it != threads.end(); it++)
+  {
+    delete (*it);
+  }
+  threads.clear();
 }
 
 Program& Program::operator=(const Program &rhs)
@@ -57,89 +80,172 @@ Program& Program::operator=(const Program &rhs)
   return *this;
 }
 
-void Program::parse_ptx_file(const char *file_name, int &max_num_threads)
+/*static*/
+void Program::parse_ptx_file(const char *file_name, Weft *weft,
+                             std::vector<Program*> &programs)
 {
+  assert(file_name != NULL);
+
+  if (weft->print_verbose())
+    fprintf(stdout,"WEFT INFO: Parsing file %s...\n", file_name);
+
+  if (weft->perform_instrumentation())
+    weft->start_parsing_instrumentation();
+
+  Program *current = NULL;
   std::ifstream file(file_name);
-  std::vector<std::pair<std::string,int> > lines;
   std::map<int,const char*> source_files;
   // First, let's get all the lines we care about
-  if (file.is_open())
-  {
-    bool start_recording = false;
-    bool found = false;
-    std::string line;
-    int line_num = 1;
-    std::getline(file, line);
-    while (!file.eof())
-    {
-      if (start_recording)
-        lines.push_back(std::pair<std::string,int>(line,line_num));
-      // Try parsing this as a file location
-      parse_file_location(line, source_files);
-      if (line.find(".entry") != std::string::npos)
-      {
-        // We should only have one entry kernel, we don't know
-        // how to do this for more than one kernel at the moment
-        if (start_recording)
-        {
-          char buffer[1024];
-          snprintf(buffer, 1023, "Found multiple entry kernels in file %s. "
-                                 "Weft currently only supports one kernel "
-                                 "per file", file_name);
-          weft->report_error(WEFT_ERROR_MULTIPLE_KERNELS, buffer);
-        }
-        start_recording = true;
-      }
-      if (!found && (line.find(".maxntid") != std::string::npos))
-      {
-        int temp = atoi(line.substr(line.find(" "),line.find(",")).c_str());
-        if (max_num_threads != -1)
-        {
-          if (temp != max_num_threads)
-          {
-            char buffer[1024];
-            snprintf(buffer, 1023, "Found max thread count %d "
-                           "which does not agree with specified count "
-                           "of %d", temp, max_num_threads);
-            weft->report_error(WEFT_ERROR_THREAD_COUNT_MISMATCH, buffer);
-          }
-        }
-        else
-          max_num_threads = temp;
-        found = true;
-      }
-      if (line.find(".version") != std::string::npos)
-      {
-        double version = atof(line.substr(line.find(" ")).c_str());
-        if (version < 3.2)
-        {
-          char buffer[1024];
-          snprintf(buffer,1023, "Weft requires PTX version 3.2 (CUDA 5.5) or later! "
-                    "File %s contains PTX version %g", file_name, version);
-          weft->report_error(WEFT_ERROR_INVALID_PTX_VERSION, buffer);
-        }
-      }
-      line_num++;
-      std::getline(file, line);
-    }
-  }
-  else
+  if (!file.is_open())
   {
     char buffer[1024];
     snprintf(buffer, 1023, "Unable to open file %s", file_name);
     weft->report_error(WEFT_ERROR_FILE_OPEN, buffer);
   }
+  bool found = false;
+  std::string line, kernel_name;
+  int line_num = 1;
+  std::getline(file, line);
+  int block_dim[3];
+  while (!file.eof())
+  {
+    if (current != NULL)
+      current->add_line(line, line_num);
+    // Try parsing this as a file location
+    parse_file_location(line, source_files);
+    if (line.find(".entry") != std::string::npos)
+    {
+      // We should only have one entry kernel, we don't know
+      // how to do this for more than one kernel at the moment
+      if (current != NULL)
+      {
+        if (!found)
+        {
+          char buffer[1024];
+          snprintf(buffer, 1023," Failed to find max number of threads for "
+                         "kernel %s and the value was not set on the command "
+                         "line using the '-n' flag", kernel_name.c_str());
+          weft->report_error(WEFT_ERROR_NO_THREAD_COUNT, buffer);
+        }
+        else
+        {
+          current->set_block_dim(block_dim);
+          found = false;
+        }
+        programs.push_back(current);
+      }
+      size_t start = line.find(".entry")+7;
+      if (line.find("(") != std::string::npos)
+      {
+        size_t stop = line.find("(");
+        int status;
+        char *realname = 
+          abi::__cxa_demangle(line.substr(start,stop-start).c_str(), 0, 0, &status);
+        std::string full_name(realname);
+        kernel_name = full_name.substr(0, full_name.find("("));
+        current = new Program(weft, kernel_name);
+        free(realname);
+      }
+      else
+      {
+        int status;
+        char *realname = 
+          abi::__cxa_demangle(line.substr(start).c_str(), 0, 0, &status);
+        std::string full_name(realname);
+        kernel_name = full_name.substr(0, full_name.find("("));
+        current = new Program(weft, kernel_name);  
+        free(realname);
+      }
+    }
+    if (!found && (line.find(".maxntid") != std::string::npos))
+    {
+      found = true;
+      std::string remaining = line.substr(line.find(".maxntid")+8);
+      int str_index = 0;
+      for (int i = 0; i < 3; i++)
+      {
+        bool has_dim = false;
+        char buffer[8]; // No more than 1024 threads per CTA
+        int buffer_index = 0; 
+        while ((str_index < remaining.size()) &&
+               ((remaining[str_index] < '0') || 
+               (remaining[str_index] > '9')))
+          str_index++; 
+        while ((str_index < remaining.size()) &&
+               (remaining[str_index] >= '0') &&
+               (remaining[str_index] <= '9'))
+        {
+          buffer[buffer_index] = remaining[str_index];
+          str_index++; buffer_index++;
+          has_dim = true;
+        }
+        buffer[buffer_index] = '\0';
+        if (has_dim)
+          block_dim[i] = atoi(buffer);
+        else
+          block_dim[i] = 1; // Unspecified dimensions are set to one
+      }
+    }
+    if (line.find(".version") != std::string::npos)
+    {
+      double version = atof(line.substr(line.find(" ")).c_str());
+      if (version < 3.2)
+      {
+        char buffer[1024];
+        snprintf(buffer,1023, "Weft requires PTX version 3.2 (CUDA 5.5) or later! "
+                  "File %s contains PTX version %g", file_name, version);
+        weft->report_error(WEFT_ERROR_INVALID_PTX_VERSION, buffer);
+      }
+    }
+    line_num++;
+    std::getline(file, line);
+  }
+  if (current == NULL)
+  {
+    char buffer[1024];
+    snprintf(buffer,1023, "Weft found no entry point kernels "
+                          "in PTX file %s\n", file_name);
+    weft->report_error(WEFT_ERROR_NO_KERNELS, buffer);
+  }
+  else
+    programs.push_back(current);
+  if (!found)
+  {
+    char buffer[1024];
+    snprintf(buffer, 1023," Failed to find max number of threads for "
+                   "kernel %s and the value was not set on the command "
+                   "line using the '-n' flag", kernel_name.c_str());
+    weft->report_error(WEFT_ERROR_NO_THREAD_COUNT, buffer);  
+  }
+  else
+    current->set_block_dim(block_dim);
   // If we didn't find a source file issue a warning
   if (source_files.empty())
     fprintf(stderr,"WEFT WARNING: No line information found! Line numbers from PTX "
        "will be used!\n\t\tTry re-running nvcc with the '-lineinfo' flag!\n");
   // Once we have the lines, then convert them into static PTX instructions
-  convert_to_instructions(max_num_threads, lines, source_files);
+  for (std::vector<Program*>::const_iterator it = programs.begin();
+        it != programs.end(); it++)
+  {
+    (*it)->convert_to_instructions(source_files);
+  }
+
+  if (weft->perform_instrumentation())
+    weft->stop_parsing_instrumentation();
+
+  if (weft->print_verbose())
+  {
+    for (std::vector<Program*>::const_iterator it = programs.begin();
+          it != programs.end(); it++)
+    {
+      (*it)->report_statistics();
+    }
+  }
 }
 
 void Program::report_statistics(void)
 {
-  fprintf(stdout,"WEFT INFO: Program Statistics\n");
+  fprintf(stdout,"WEFT INFO: Program Statistics for Kernel %s\n", kernel_name.c_str());
   fprintf(stdout,"  Static Instructions: %ld\n", ptx_instructions.size());
   fprintf(stdout,"  Instruction Counts\n");
   unsigned counts[PTX_LAST];
@@ -167,7 +273,7 @@ void Program::report_statistics(const std::vector<Thread*> &threads)
   {
     total_count += (*it)->accumulate_instruction_counts(instruction_counts);
   }
-  fprintf(stdout,"WEFT INFO: Program Statistics\n");
+  fprintf(stdout,"WEFT INFO: Program Statistics for Kernel %s\n", kernel_name.c_str());
   fprintf(stdout,"  Dynamic Instructions: %d\n", total_count);
   fprintf(stdout,"  Instruction Counts\n");
   for (unsigned idx = 0; idx < PTX_LAST; idx++)
@@ -189,6 +295,233 @@ bool Program::has_shuffles(void) const
       return true;
   }
   return false;
+}
+
+void Program::emulate_threads(void)
+{
+  if (weft->print_verbose())
+    fprintf(stdout,"WEFT INFO: Emulating %d GPU threads "
+                   "for kernel %s...\n",
+                   max_num_threads, kernel_name.c_str());
+  
+  if (weft->perform_instrumentation())
+    start_instrumentation(EMULATE_THREADS_STAGE);
+
+  assert(shared_memory == NULL);
+  shared_memory = new SharedMemory(weft, this);
+  assert(max_num_threads > 0);
+  assert(max_num_threads == (block_dim[0]*block_dim[1]*block_dim[2]));
+  threads.resize(max_num_threads, NULL);
+  // If we are doing warp synchronous execution we 
+  // execute all the threads in a warp together
+  if (warp_synchronous) 
+  {
+    assert((max_num_threads % WARP_SIZE) == 0);
+    weft->initialize_count(max_num_threads/WARP_SIZE);
+    int tid = 0;
+    for (int z = 0; z < block_dim[2]; z++)
+    {
+      for (int y = 0; y < block_dim[1]; y++)
+      {
+        for (int x = 0; x < block_dim[0]; x++)
+        {
+          threads[tid] = new Thread(tid, x, y, z, this, shared_memory);
+          // Increment first
+          tid++;
+          // Only kick off a warp once we've generated all the threads
+          if ((tid % WARP_SIZE) == 0)
+          {
+            assert((tid-WARP_SIZE) >= 0);
+            EmulateWarp *task = 
+              new EmulateWarp(this, &(threads[tid-WARP_SIZE]));
+            weft->enqueue_task(task);
+          }
+        }
+      }
+    }
+  }
+  else
+  {
+    weft->initialize_count(max_num_threads);
+    int tid = 0;
+    for (int z = 0; z < block_dim[2]; z++)
+    {
+      for (int y = 0; y < block_dim[1]; y++)
+      {
+        for (int x = 0; x < block_dim[0]; x++)
+        {
+          threads[tid] = new Thread(tid, x, y, z, this, shared_memory); 
+          EmulateThread *task = new EmulateThread(threads[tid]);
+          weft->enqueue_task(task);
+          tid++;
+        }
+      }
+    }
+  }
+  weft->wait_until_done();
+  // Get the maximum barrier ID from all threads
+  for (int i = 0; i < max_num_threads; i++)
+  {
+    int local_max = threads[i]->get_max_barrier_name();
+    if ((local_max+1) > max_num_barriers)
+      max_num_barriers = (local_max+1);
+  }
+  if (weft->print_verbose())
+  {
+    fprintf(stdout,"WEFT INFO: Emulation found %d named barriers for kernel %s.\n",
+                    barrier_upper_bound(), kernel_name.c_str());
+    report_statistics();
+  }
+
+  if (weft->perform_instrumentation())
+    stop_instrumentation(EMULATE_THREADS_STAGE);
+
+  // If we want to dump thread-specific files, do that now
+  // Note that we don't include this in the timing
+  if (weft->emit_program_files())
+    print_files();
+}
+
+void Program::construct_dependence_graph(void)
+{
+  if (weft->print_verbose())
+    fprintf(stdout,"WEFT INFO: Constructing barrier dependence graph "
+                   "for kernel %s...\n", kernel_name.c_str());
+
+  if (weft->perform_instrumentation())
+    start_instrumentation(CONSTRUCT_BARRIER_GRAPH_STAGE);
+
+  assert(graph == NULL);
+  graph = new BarrierDependenceGraph(weft, this);
+  graph->construct_graph(threads);
+
+  // Validate the graph 
+  int total_validation_tasks = graph->count_validation_tasks();
+  if (weft->print_verbose())
+    fprintf(stdout,"WEFT INFO: Performing %d graph validation checks...\n",
+                              total_validation_tasks);
+  if (total_validation_tasks > 0)
+  {
+    weft->initialize_count(total_validation_tasks);
+    graph->enqueue_validation_tasks();
+    weft->wait_until_done();
+    graph->check_for_validation_errors();
+  }
+
+  if (weft->perform_instrumentation())
+    stop_instrumentation(CONSTRUCT_BARRIER_GRAPH_STAGE);
+}
+
+void Program::compute_happens_relationships(void)
+{
+  if (weft->print_verbose())
+    fprintf(stdout,"WEFT INFO: Computing happens-before/after "
+                   "relationships for kernel %s...\n", kernel_name.c_str());
+
+  if (weft->perform_instrumentation())
+    start_instrumentation(COMPUTE_HAPPENS_RELATIONSHIP_STAGE);
+
+  // First initialize all the data structures
+  weft->initialize_count(threads.size());
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+    weft->enqueue_task(
+        new InitializationTask(*it, threads.size(), max_num_barriers));
+  weft->wait_until_done();
+
+  // Compute barrier reachability
+  // There are twice as many tasks as barriers
+  int total_barriers = graph->count_total_barriers();
+  weft->initialize_count(2*total_barriers);
+  graph->enqueue_reachability_tasks();
+  weft->wait_until_done();
+
+  // Compute latest/earliest happens-before/after tasks
+  // There are twice as many tasks as barriers
+  weft->initialize_count(2*total_barriers);
+  graph->enqueue_transitive_happens_tasks();
+  weft->wait_until_done();
+
+  // Finally update all the happens relationships
+  weft->initialize_count(threads.size());
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+    weft->enqueue_task(new UpdateThreadTask(*it));
+  weft->wait_until_done();
+
+  if (weft->perform_instrumentation())
+    stop_instrumentation(COMPUTE_HAPPENS_RELATIONSHIP_STAGE);
+}
+
+void Program::check_for_race_conditions(void)
+{
+  if (weft->print_verbose())
+    fprintf(stdout,"WEFT INFO: Checking for race conditions in "
+                   "kernel %s...\n", kernel_name.c_str());
+
+  if (weft->perform_instrumentation())
+    start_instrumentation(CHECK_FOR_RACES_STAGE);
+
+  weft->initialize_count(shared_memory->count_addresses());
+  shared_memory->enqueue_race_checks();
+  weft->wait_until_done();
+  shared_memory->check_for_races();
+
+  if (weft->perform_instrumentation())
+    stop_instrumentation(CHECK_FOR_RACES_STAGE);
+}
+
+void Program::print_statistics(void)
+{
+  fprintf(stdout,"WEFT STATISTICS for Kernel %s\n", kernel_name.c_str());
+  fprintf(stdout,"  CTA Thread Count:          %15d\n", max_num_threads);
+  fprintf(stdout,"  Shared Memory Locations:   %15d\n", 
+                                    shared_memory->count_addresses());
+  fprintf(stdout,"  Physical Named Barriers;   %15d\n", max_num_barriers);
+  fprintf(stdout,"  Dynamic Barrier Instances: %15d\n", 
+                                    graph->count_total_barriers());
+  fprintf(stdout,"  Static Instructions:       %15d\n", 
+                                    count_instructions());
+  fprintf(stdout,"  Dynamic Instructions:      %15d\n",
+                                    count_dynamic_instructions());
+  fprintf(stdout,"  Weft Statements:           %15d\n",
+                                    count_weft_statements());   
+  fprintf(stdout,"  Total Race Tests:          %15ld\n",
+                                    shared_memory->count_race_tests());
+}
+
+void Program::print_files(void)
+{
+  weft->initialize_count(max_num_threads);
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+  {
+    DumpThreadTask *dump_task = new DumpThreadTask(*it); 
+    weft->enqueue_task(dump_task);
+  }
+  weft->wait_until_done();
+}
+
+int Program::count_dynamic_instructions(void)
+{
+  int result = 0;
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+  {
+    result += (*it)->count_dynamic_instructions();
+  }
+  return result;
+}
+
+int Program::count_weft_statements(void)
+{
+  int result = 0;
+  for (std::vector<Thread*>::const_iterator it = threads.begin();
+        it != threads.end(); it++)
+  {
+    result += (*it)->count_weft_statements();
+  }
+  return result;
 }
 
 int Program::emulate(Thread *thread)
@@ -262,8 +595,42 @@ void Program::emulate_warp(Thread **threads)
     threads[i]->set_dynamic_instructions(dynamic_instructions[i]);
 }
 
-void Program::convert_to_instructions(int max_num_threads,
-                const std::vector<std::pair<std::string,int> > &lines,
+void Program::get_kernel_prefix(char *buffer, size_t count)
+{
+  strncpy(buffer, kernel_name.c_str(), count);
+}
+
+void Program::add_line(const std::string &line, int line_num)
+{
+  lines.push_back(std::pair<std::string,int>(line, line_num));
+}
+
+void Program::set_block_dim(int *array)
+{
+  for (int i = 0; i < 3; i++)
+    block_dim[i] = array[i];
+  max_num_threads = block_dim[0] * block_dim[1] * block_dim[2];
+}
+
+void Program::fill_block_dim(int *array) const
+{
+  for (int i = 0; i < 3; i++)
+    array[i] = block_dim[i];
+}
+
+void Program::fill_block_id(int *array) const
+{
+  for (int i = 0; i < 3; i++)
+    array[i] = block_id[i];
+}
+
+void Program::fill_grid_dim(int *array) const
+{
+  for (int i = 0; i < 3; i++)
+    array[i] = grid_dim[i];
+}
+
+void Program::convert_to_instructions(
                 const std::map<int,const char*> &source_files)
 {
   // Make a first pass and create all the instructions
@@ -313,8 +680,20 @@ void Program::convert_to_instructions(int max_num_threads,
       barrier->update_count(max_num_threads);
     }
   }
+  // Check for shuffles, if we have shuffles then make sure
+  // that we have enabled warp-synchronous execution
+  if (!warp_synchronous && has_shuffles())
+  {
+    fprintf(stdout,"WEFT WARNING: Program %s has shuffle instructions "
+                   "but warp-synchronous execution was not assumed!\n"
+                   "Enabling warp-synchronous assumption...\n",
+                   kernel_name.c_str());
+    warp_synchronous = true;
+  }
+  lines.clear();
 }
 
+/*static*/
 bool Program::parse_file_location(const std::string &line,
                                   std::map<int,const char*> &source_files)
 {
@@ -333,6 +712,7 @@ bool Program::parse_file_location(const std::string &line,
   return false;
 }
 
+/*static*/
 bool Program::parse_source_location(const std::string &line,
                                     int &source_file, int &source_line)
 {
@@ -347,6 +727,52 @@ bool Program::parse_source_location(const std::string &line,
     return true;
   }
   return false;
+}
+
+void Program::start_instrumentation(ProgramStage stage)
+{
+  timing[stage] = weft->get_current_time_in_micros();
+}
+
+void Program::stop_instrumentation(ProgramStage stage)
+{
+  unsigned long long stop = weft->get_current_time_in_micros();
+  unsigned long long start = timing[stage];
+  timing[stage] = stop - start;
+  memory_usage[stage] = weft->get_memory_usage();
+}
+
+void Program::report_instrumentation(size_t &accumulated_memory)
+{
+  const char *stage_names[TOTAL_STAGES] = { "Emulate Threads",
+                         "Construct Barrier Dependence Graph",
+                         "Compute Happens-Before/After Relationships",
+                         "Check for Race Conditions" };
+  fprintf(stdout,"WEFT INSTRUMENTATION FOR KERNEL %s\n", kernel_name.c_str());
+  unsigned long long total_time = 0;
+  size_t total_memory = 0;
+  for (int i = 0; i < TOTAL_STAGES; i++)
+  {
+    double time = double(timing[i]) * 1e-3;
+    size_t memory = memory_usage[i] - accumulated_memory;
+#ifdef __MACH__
+    fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
+            stage_names[i], time, memory / (1024 * 1024));
+#else
+    fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
+            stage_names[i], time, memory / 1024);
+#endif
+    total_time += timing[i];
+    total_memory += memory;
+    accumulated_memory += memory;
+  }
+#ifdef __MACH__
+  fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
+          "Total", double(total_time) * 1e-3, total_memory / (1024*1024));
+#else
+  fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
+          "Total", double(total_time) * 1e-3, total_memory / 1024);
+#endif
 }
 
 Thread::Thread(unsigned tid, int tidx, int tidy, int tidz,
@@ -380,9 +806,9 @@ void Thread::initialize(void)
   int block_dim[3];
   int block_id[3];
   int grid_dim[3];
-  program->weft->fill_block_dim(block_dim);
-  program->weft->fill_block_id(block_id);
-  program->weft->fill_grid_dim(grid_dim);
+  program->fill_block_dim(block_dim);
+  program->fill_block_id(block_id);
+  program->fill_grid_dim(grid_dim);
   // Before starting emulation fill in the special
   // values for particular registers
   register_store[WEFT_TID_X_REG] = tid_x;
@@ -553,7 +979,7 @@ void Thread::dump_weft_thread(void)
   // Open up a file for this thread and then 
   // print out all of our weft instructions
   char file_name[1024];
-  program->weft->get_file_prefix(file_name, 1024-32);
+  program->get_kernel_prefix(file_name, 1024-32);
   char buffer[32];
   snprintf(buffer, 31, "_%d_%d_%d.weft", tid_x, tid_y, tid_z);
   strncat(file_name, buffer, 31);

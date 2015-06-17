@@ -36,11 +36,9 @@
 #endif
 
 Weft::Weft(int argc, char **argv)
-  : file_name(NULL), max_num_threads(-1), 
-    thread_pool_size(1), max_num_barriers(1),
+  : file_name(NULL), thread_pool_size(1), 
     verbose(false), detailed(false), instrument(false), 
     warnings(false), warp_synchronous(false), print_files(false),
-    program(NULL), shared_memory(NULL), graph(NULL),
     worker_threads(NULL), pending_count(0)
 {
   for (int i = 0; i < 3; i++)
@@ -56,39 +54,29 @@ Weft::Weft(int argc, char **argv)
 Weft::~Weft(void)
 {
   stop_threadpool();
-  if (program != NULL)
-  {
-    delete program;
-    program = NULL;
-  }
-  if (shared_memory != NULL)
-  {
-    delete shared_memory;
-    shared_memory = NULL;
-  }
-  if (graph != NULL)
-  {
-    delete graph;
-    graph = NULL;
-  }
-  for (std::vector<Thread*>::iterator it = threads.begin();
-        it != threads.end(); it++)
+  for (std::vector<Program*>::iterator it = programs.begin();
+        it != programs.end(); it++)
   {
     delete (*it);
   }
-  threads.clear();
-  if (instrument)
-    report_instrumentation();
+  programs.clear();
 }
 
 void Weft::verify(void)
 {
-  parse_ptx();
-  emulate_threads();
-  construct_dependence_graph();
-  compute_happens_relationships();
-  check_for_race_conditions();
-  print_statistics();
+  Program::parse_ptx_file(file_name, this, programs);
+  for (std::vector<Program*>::const_iterator it = programs.begin();
+        it != programs.end(); it++)
+  {
+    Program *program = *it;
+    program->emulate_threads();
+    program->construct_dependence_graph();
+    program->compute_happens_relationships();
+    program->check_for_race_conditions();
+    program->print_statistics();
+  }
+  if (instrument)
+    report_instrumentation();
 }
 
 void Weft::report_error(int error_code, const char *message)
@@ -135,9 +123,7 @@ void Weft::parse_inputs(int argc, char **argv)
     if (!strcmp(argv[i],"-n"))
     {
       std::string threads(argv[++i]);
-      // If we succeeded, compute the max number of threads
-      if (parse_triple(threads, block_dim, "-n", "CTA size"))
-        max_num_threads = block_dim[0] * block_dim[1] * block_dim[2];
+      parse_triple(threads, block_dim, "-n", "CTA size");
       continue;
     }
     if (!strcmp(argv[i],"-p"))
@@ -268,287 +254,51 @@ void Weft::report_usage(int error, const char *error_str)
   fprintf(stderr,"  -s: assume warp-synchronous execution\n");
   fprintf(stderr,"  -t: thread pool size\n");
   fprintf(stderr,"  -v: print verbose output\n");
-  fprintf(stderr,"  -w: report emulation warnings (this will generate considerable output)\n");
+  fprintf(stderr,"  -w: report emulation warnings (this may generate considerable output)\n");
   exit(error);
 }
 
-void Weft::parse_ptx(void)
-{
-  assert(file_name != NULL);
-  if (verbose)
-    fprintf(stdout,"WEFT INFO: Parsing file %s...\n", file_name);
-  if (instrument)
-    start_instrumentation(0/*stage*/);
-  assert(program == NULL);
-  program = new Program(this);
-  bool need_update = (max_num_threads == -1);
-  program->parse_ptx_file(file_name, max_num_threads);
-  // If we didn't get a block size, make it Nx1x1
-  if (need_update)
-    block_dim[0] = max_num_threads;
-  if (max_num_threads <= 0)
-  {
-    char buffer[1024];
-    snprintf(buffer, 1023," Failed to find max number of threads "
-                   "in file %s and the value was not set on the command "
-                   "line using the '-n' flag", file_name);
-    report_error(WEFT_ERROR_NO_THREAD_COUNT, buffer);
-  }
-  // Check for shuffles, if we have shuffles then make sure
-  // that we have enabled warp-synchronous execution
-  if (!warp_synchronous && program->has_shuffles())
-  {
-    fprintf(stdout,"WEFT WARNING: Program has shuffle instructions "
-                   "but warp-synchronous execution was not assumed!\n"
-                   "Enabling warp-synchronous assumption...\n");
-    warp_synchronous = true;
-  }
-  if (instrument)
-    stop_instrumentation(0/*stage*/);
-  if (verbose)
-    program->report_statistics();
-}
-
-void Weft::emulate_threads(void)
-{
-  if (verbose)
-    fprintf(stdout,"WEFT INFO: Emulating %d GPU threads "
-                   "with %d CPU threads...\n",
-                   max_num_threads, thread_pool_size);
-  if (instrument)
-    start_instrumentation(1/*stage*/);
-  assert(shared_memory == NULL);
-  shared_memory = new SharedMemory(this);
-  assert(max_num_threads > 0);
-  assert(max_num_threads == (block_dim[0]*block_dim[1]*block_dim[2]));
-  threads.resize(max_num_threads, NULL);
-  // If we are doing warp synchronous execution we 
-  // execute all the threads in a warp together
-  if (warp_synchronous) 
-  {
-    assert((max_num_threads % WARP_SIZE) == 0);
-    initialize_count(max_num_threads/WARP_SIZE);
-    int tid = 0;
-    for (int z = 0; z < block_dim[2]; z++)
-    {
-      for (int y = 0; y < block_dim[1]; y++)
-      {
-        for (int x = 0; x < block_dim[0]; x++)
-        {
-          threads[tid] = new Thread(tid, x, y, z, program, shared_memory);
-          // Increment first
-          tid++;
-          // Only kick off a warp once we've generated all the threads
-          if ((tid % WARP_SIZE) == 0)
-          {
-            assert((tid-WARP_SIZE) >= 0);
-            EmulateWarp *task = 
-              new EmulateWarp(program, &(threads[tid-WARP_SIZE]));
-            enqueue_task(task);
-          }
-        }
-      }
-    }
-  }
-  else
-  {
-    initialize_count(max_num_threads);
-    int tid = 0;
-    for (int z = 0; z < block_dim[2]; z++)
-    {
-      for (int y = 0; y < block_dim[1]; y++)
-      {
-        for (int x = 0; x < block_dim[0]; x++)
-        {
-          threads[tid] = new Thread(tid, x, y, z, program, shared_memory); 
-          EmulateThread *task = new EmulateThread(threads[tid]);
-          enqueue_task(task);
-          tid++;
-        }
-      }
-    }
-  }
-  wait_until_done();
-  // Get the maximum barrier ID from all threads
-  for (int i = 0; i < max_num_threads; i++)
-  {
-    int local_max = threads[i]->get_max_barrier_name();
-    if ((local_max+1) > max_num_barriers)
-      max_num_barriers = (local_max+1);
-  }
-  if (verbose)
-  {
-    fprintf(stdout,"WEFT INFO: Emulation found %d named barriers.\n",
-                    max_num_barriers);
-    program->report_statistics(threads);
-  }
-
-  if (instrument)
-    stop_instrumentation(1/*stage*/);
-
-  // If we want to dump thread-specific files, do that now
-  // Note that we don't include this in the timing
-  if (print_files)
-  {
-    initialize_count(max_num_threads);
-    for (std::vector<Thread*>::const_iterator it = threads.begin();
-          it != threads.end(); it++)
-    {
-      DumpThreadTask *dump_task = new DumpThreadTask(*it); 
-      enqueue_task(dump_task);
-    }
-    wait_until_done();
-  }
-}
-
-void Weft::construct_dependence_graph(void)
-{
-  if (verbose)
-    fprintf(stdout,"WEFT INFO: Constructing barrier dependence graph...\n");
-  if (instrument)
-    start_instrumentation(2/*stage*/);
-
-  assert(graph == NULL);
-  graph = new BarrierDependenceGraph(this);
-  graph->construct_graph(threads);
-
-  // Validate the graph 
-  int total_validation_tasks = graph->count_validation_tasks();
-  if (verbose)
-    fprintf(stdout,"WEFT INFO: Performing %d graph validation checks...\n",
-                              total_validation_tasks);
-  if (total_validation_tasks > 0)
-  {
-    initialize_count(total_validation_tasks);
-    graph->enqueue_validation_tasks();
-    wait_until_done();
-    graph->check_for_validation_errors();
-  }
-
-  if (instrument)
-    stop_instrumentation(2/*stage*/);
-}
-
-void Weft::compute_happens_relationships(void)
-{
-  if (verbose)
-    fprintf(stdout,"WEFT INFO: Computing happens-before/after "
-                   "relationships...\n");
-  if (instrument)
-    start_instrumentation(3/*stage*/);
-
-  // First initialize all the data structures
-  initialize_count(threads.size());
-  for (std::vector<Thread*>::const_iterator it = threads.begin();
-        it != threads.end(); it++)
-    enqueue_task(new InitializationTask(*it, threads.size(), max_num_barriers));
-  wait_until_done();
-
-  // Compute barrier reachability
-  // There are twice as many tasks as barriers
-  int total_barriers = graph->count_total_barriers();
-  initialize_count(2*total_barriers);
-  graph->enqueue_reachability_tasks();
-  wait_until_done();
-
-  // Compute latest/earliest happens-before/after tasks
-  // There are twice as many tasks as barriers
-  initialize_count(2*total_barriers);
-  graph->enqueue_transitive_happens_tasks();
-  wait_until_done();
-
-  // Finally update all the happens relationships
-  initialize_count(threads.size());
-  for (std::vector<Thread*>::const_iterator it = threads.begin();
-        it != threads.end(); it++)
-    enqueue_task(new UpdateThreadTask(*it));
-  wait_until_done();
-
-  if (instrument)
-    stop_instrumentation(3/*stage*/);
-}
-
-void Weft::check_for_race_conditions(void)
-{
-  if (verbose)
-    fprintf(stdout,"WEFT INFO: Checking for race conditions...\n");
-  if (instrument)
-    start_instrumentation(4/*stage*/);
-
-  initialize_count(shared_memory->count_addresses());
-  shared_memory->enqueue_race_checks();
-  wait_until_done();
-  shared_memory->check_for_races();
-
-  if (instrument)
-    stop_instrumentation(4/*stage*/);
-}
-
-void Weft::print_statistics(void)
-{
-  fprintf(stdout,"WEFT STATISTICS for %s\n", file_name);
-  fprintf(stdout,"  CTA Thread Count:          %15d\n", max_num_threads);
-  fprintf(stdout,"  Shared Memory Locations:   %15d\n", 
-                                    shared_memory->count_addresses());
-  fprintf(stdout,"  Physical Named Barriers;   %15d\n", max_num_barriers);
-  fprintf(stdout,"  Dynamic Barrier Instances: %15d\n", 
-                                    graph->count_total_barriers());
-  fprintf(stdout,"  Static Instructions:       %15d\n", 
-                                    program->count_instructions());
-  fprintf(stdout,"  Dynamic Instructions:      %15d\n",
-                                    count_dynamic_instructions());
-  fprintf(stdout,"  Weft Statements:           %15d\n",
-                                    count_weft_statements());   
-  fprintf(stdout,"  Total Race Tests:          %15ld\n",
-                                    shared_memory->count_race_tests());
-}
-
-int Weft::count_dynamic_instructions(void)
-{
-  int result = 0;
-  for (std::vector<Thread*>::const_iterator it = threads.begin();
-        it != threads.end(); it++)
-  {
-    result += (*it)->count_dynamic_instructions();
-  }
-  return result;
-}
-
-int Weft::count_weft_statements(void)
-{
-  int result = 0;
-  for (std::vector<Thread*>::const_iterator it = threads.begin();
-        it != threads.end(); it++)
-  {
-    result += (*it)->count_weft_statements();
-  }
-  return result;
-}
-
-void Weft::fill_block_dim(int *array)
+void Weft::initialize_program(int *bdim, int *bid,
+                              int *gdim, bool &synchronous)
 {
   for (int i = 0; i < 3; i++)
-    array[i] = block_dim[i];
-}
-
-void Weft::fill_block_id(int *array)
-{
+    bdim[i] = block_dim[i];
   for (int i = 0; i < 3; i++)
-    array[i] = block_id[i];
-}
-
-void Weft::fill_grid_dim(int *array)
-{
+    bid[i] = block_id[i];
   for (int i = 0; i < 3; i++)
-    array[i] = grid_dim[i];
+    gdim[i] = grid_dim[i];
+  synchronous = warp_synchronous;
 }
 
-void Weft::get_file_prefix(char *buffer, size_t count)
+void Weft::start_parsing_instrumentation(void)
 {
-  std::string full_name(file_name);
-  assert(full_name.find(".ptx") != std::string::npos);
-  std::string base = full_name.substr(0, full_name.find(".ptx"));
-  strncpy(buffer, base.c_str(), count);
+  parsing_time = get_current_time_in_micros();
+}
+
+void Weft::stop_parsing_instrumentation(void)
+{
+  unsigned long long stop = get_current_time_in_micros();
+  unsigned long long start = parsing_time;
+  parsing_time = stop - start;
+  parsing_memory = get_memory_usage();
+}
+
+void Weft::report_instrumentation(void)
+{
+  fprintf(stdout,"WEFT INSTRUMENTATION FOR PARSING FILE %s\n", file_name); 
+#ifdef __MACH__
+  fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
+          "Parse PTX", double(parsing_time) * 1e-3, parsing_memory / (1024 * 1024));
+#else
+  fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
+          "Parse PTX", double(parsing_time) * 1e-3, parsing_memory / 1024);
+#endif
+  size_t accumulated_memory = parsing_memory;
+  for (std::vector<Program*>::const_iterator it = programs.begin();
+        it != programs.end(); it++)
+  {
+    (*it)->report_instrumentation(accumulated_memory);
+  }
 }
 
 void Weft::start_threadpool(void)
@@ -692,51 +442,6 @@ size_t Weft::get_memory_usage(void)
   struct rusage usage;
   getrusage(RUSAGE_SELF, &usage);
   return usage.ru_maxrss;
-}
-
-void Weft::start_instrumentation(int stage)
-{
-  timing[stage] = get_current_time_in_micros();
-}
-
-void Weft::stop_instrumentation(int stage)
-{
-  unsigned long long stop = get_current_time_in_micros();
-  unsigned long long start = timing[stage];
-  timing[stage] = stop - start;
-  memory_usage[stage] = get_memory_usage();
-}
-
-void Weft::report_instrumentation(void)
-{
-  const char *stage_names[5] = { "Parse PTX", "Emulate Threads",
-                                 "Construct Barrier Dependence Graph",
-                                 "Compute Happens-Before/After Relationships",
-                                 "Check for Race Conditions" };
-  fprintf(stdout,"WEFT INSTRUMENTATION\n");
-  unsigned long long total_time = 0;
-  size_t total_memory = 0;
-  for (int i = 0; i < 5; i++)
-  {
-    double time = double(timing[i]) * 1e-3;
-    size_t memory = memory_usage[i] - total_memory;
-#ifdef __MACH__
-    fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
-            stage_names[i], time, memory / (1024 * 1024));
-#else
-    fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
-            stage_names[i], time, memory / 1024);
-#endif
-    total_time += timing[i];
-    total_memory += memory;
-  }
-#ifdef __MACH__
-  fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
-          "Total", double(total_time) * 1e-3, total_memory / (1024*1024));
-#else
-  fprintf(stdout,"  %50s: %10.3lf ms %12ld MB\n",
-          "Total", double(total_time) * 1e-3, total_memory / 1024);
-#endif
 }
 
 int main(int argc, char **argv)

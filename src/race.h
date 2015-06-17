@@ -26,6 +26,7 @@
 
 class Weft;
 class Thread;
+class Program;
 class WeftAccess;
 class WeftBarrier;
 class SharedMemory;
@@ -81,8 +82,8 @@ protected:
 
 class SharedMemory {
 public:
-  SharedMemory(Weft *weft);
-  SharedMemory(const SharedMemory &rhs) : weft(NULL) { assert(false); }
+  SharedMemory(Weft *weft, Program *program);
+  SharedMemory(const SharedMemory &rhs) : weft(NULL), program(NULL) { assert(false); }
   ~SharedMemory(void);
 public:
   SharedMemory& operator=(const SharedMemory &rhs) 
@@ -95,6 +96,7 @@ public:
   size_t count_race_tests(void);
 public:
   Weft *const weft;
+  Program *const program;
 protected:
   pthread_mutex_t memory_lock;
   std::map<int/*address*/,Address*> addresses;
