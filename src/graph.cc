@@ -561,14 +561,14 @@ void BarrierDependenceGraph::check_for_validation_errors(void)
     for (std::vector<std::pair<int,int> >::const_iterator it = 
           failed_validations.begin(); it != failed_validations.end(); it++)
     {
-      fprintf(stderr,"  Unable to find happens-before relationship "
-                     "between generations %d and %d of named barrier %d\n",
-                     it->second, it->second+1, it->first);
+      fprintf(stderr,"  Unable to find happens-before relationship between "
+                     "generations %d and %d of named barrier %d in kernel %s\n",
+                     it->second, it->second+1, it->first, program->get_name());
     }
     char buffer[1024];
-    snprintf(buffer, 1023, "Unable to find happens before relationships "
-                           "for %ld different named barrier generations",
-                           failed_validations.size());
+    snprintf(buffer, 1023, "Unable to find happens before relationships for %ld "
+                           "different named barrier generations in kernel %s",
+                           failed_validations.size(), program->get_name());
     weft->report_error(WEFT_ERROR_GRAPH_VALIDATION, buffer);
   }
   else
@@ -690,8 +690,9 @@ bool BarrierDependenceGraph::remove_complete_barriers(
         {
           char buffer[1024];
           snprintf(buffer, 1023, "Different arrival counts of %d and %d "
-                                 "possible on barrier %d",
-                                 barrier_expected[name], bar->count, name);
+                                 "possible on barrier %d in kernel %s",
+                                 barrier_expected[name], bar->count, 
+                                 name, program->get_name());
           weft->report_error(WEFT_ERROR_ARRIVAL_MISMATCH, buffer);
         }
         barrier_participants[name]++;
@@ -709,9 +710,9 @@ bool BarrierDependenceGraph::remove_complete_barriers(
     {
       char buffer[1024];
       snprintf(buffer, 1023, "Too many participants (%d) for barrier %d while "
-                             "expecting only %d participants", 
+                             "expecting only %d participants in kernel %s", 
                              barrier_participants[name], name,
-                             barrier_expected[name]);
+                             barrier_expected[name], program->get_name());
       weft->report_error(WEFT_ERROR_TOO_MANY_PARTICIPANTS, buffer);
     }
     if (barrier_participants[name] == barrier_expected[name])
@@ -719,7 +720,8 @@ bool BarrierDependenceGraph::remove_complete_barriers(
       if (all_arrives[name])
       {
         char buffer[1024];
-        snprintf(buffer, 1023, "All arrivals on barrier %d possible", name);
+        snprintf(buffer, 1023, "All arrivals on barrier %d possible in kernel %s", 
+                                name, program->get_name());
         weft->report_error(WEFT_ERROR_ALL_ARRIVALS, buffer);
       }
       // Mark that we removed a barrier
@@ -811,16 +813,17 @@ bool BarrierDependenceGraph::advance_program_counters(
         {
           char buffer[1024];
           snprintf(buffer, 1023, "Different arrival counts of %d and %d "
-                                 "possible on barrier %d",
-                                 state.expected, arrive->count, arrive->name);
+                                 "possible on barrier %d in kernel %s",
+                                 state.expected, arrive->count, 
+                                 arrive->name, program->get_name());
           weft->report_error(WEFT_ERROR_ARRIVAL_MISMATCH, buffer);
         }
         state.arrivals.insert(arrive);
         if (unsigned(state.expected) == state.arrivals.size())
         {
           char buffer[1024];
-          snprintf(buffer, 1023, "All arrivals on barrier %d possible",
-                                  arrive->name);
+          snprintf(buffer, 1023, "All arrivals on barrier %d possible in kernel %s",
+                                  arrive->name, program->get_name());
           weft->report_error(WEFT_ERROR_ALL_ARRIVALS, buffer);
         }
       }
