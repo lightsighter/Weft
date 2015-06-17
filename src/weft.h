@@ -218,8 +218,7 @@ protected:
   void report_usage(int error, const char *error_str);
   Program* parse_ptx(void);
 public:
-  void initialize_program(int *block_dim, int *block_id, 
-                          int *grid_dim, bool &warp_synchronous);
+  bool initialize_program(Program *program) const;
   void start_parsing_instrumentation(void);
   void stop_parsing_instrumentation(void);
 protected:

@@ -33,10 +33,10 @@
 Program::Program(Weft *w, std::string &name)
   : weft(w), kernel_name(name), 
     max_num_threads(-1), max_num_barriers(1),
-    shared_memory(NULL), graph(NULL)
+    current_cta(0)
 {
   // Initialize values
-  weft->initialize_program(block_dim, block_id, grid_dim, warp_synchronous);
+  warp_synchronous = weft->initialize_program(this);
   max_num_threads = block_dim[0] * block_dim[1] * block_dim[2];
 }
 
@@ -55,22 +55,26 @@ Program::~Program(void)
     delete (*it);
   }
   ptx_instructions.clear();
-  if (shared_memory != NULL)
+  for (unsigned idx = 0; idx < cta_states.size(); idx++)
   {
-    delete shared_memory;
-    shared_memory = NULL;
+    CTAState &state = cta_states[idx];
+    if (state.shared_memory != NULL)
+    {
+      delete state.shared_memory;
+      state.shared_memory = NULL;
+    }
+    if (state.graph != NULL)
+    {
+      delete state.graph;
+      state.graph = NULL;
+    }
+    for (std::vector<Thread*>::iterator it = state.threads.begin();
+          it != state.threads.end(); it++)
+    {
+      delete (*it);
+    }
   }
-  if (graph != NULL)
-  {
-    delete graph;
-    graph = NULL;
-  }
-  for (std::vector<Thread*>::iterator it = threads.begin();
-        it != threads.end(); it++)
-  {
-    delete (*it);
-  }
-  threads.clear();
+  cta_states.clear();
 }
 
 Program& Program::operator=(const Program &rhs)
@@ -307,10 +311,12 @@ void Program::emulate_threads(void)
   if (weft->perform_instrumentation())
     start_instrumentation(EMULATE_THREADS_STAGE);
 
+  SharedMemory *&shared_memory = cta_states[current_cta].shared_memory;
   assert(shared_memory == NULL);
   shared_memory = new SharedMemory(weft, this);
   assert(max_num_threads > 0);
   assert(max_num_threads == (block_dim[0]*block_dim[1]*block_dim[2]));
+  std::vector<Thread*> &threads = cta_states[current_cta].threads;
   threads.resize(max_num_threads, NULL);
   // If we are doing warp synchronous execution we 
   // execute all the threads in a warp together
@@ -391,8 +397,10 @@ void Program::construct_dependence_graph(void)
   if (weft->perform_instrumentation())
     start_instrumentation(CONSTRUCT_BARRIER_GRAPH_STAGE);
 
+  BarrierDependenceGraph *&graph = cta_states[current_cta].graph;
   assert(graph == NULL);
   graph = new BarrierDependenceGraph(weft, this);
+  std::vector<Thread*> &threads = cta_states[current_cta].threads;
   graph->construct_graph(threads);
 
   // Validate the graph 
@@ -422,6 +430,7 @@ void Program::compute_happens_relationships(void)
     start_instrumentation(COMPUTE_HAPPENS_RELATIONSHIP_STAGE);
 
   // First initialize all the data structures
+  std::vector<Thread*> &threads = cta_states[current_cta].threads;
   weft->initialize_count(threads.size());
   for (std::vector<Thread*>::const_iterator it = threads.begin();
         it != threads.end(); it++)
@@ -431,6 +440,7 @@ void Program::compute_happens_relationships(void)
 
   // Compute barrier reachability
   // There are twice as many tasks as barriers
+  BarrierDependenceGraph *&graph = cta_states[current_cta].graph;
   int total_barriers = graph->count_total_barriers();
   weft->initialize_count(2*total_barriers);
   graph->enqueue_reachability_tasks();
@@ -462,6 +472,7 @@ void Program::check_for_race_conditions(void)
   if (weft->perform_instrumentation())
     start_instrumentation(CHECK_FOR_RACES_STAGE);
 
+  SharedMemory *&shared_memory = cta_states[current_cta].shared_memory;
   weft->initialize_count(shared_memory->count_addresses());
   shared_memory->enqueue_race_checks();
   weft->wait_until_done();
@@ -475,23 +486,20 @@ void Program::print_statistics(void)
 {
   fprintf(stdout,"WEFT STATISTICS for Kernel %s\n", kernel_name.c_str());
   fprintf(stdout,"  CTA Thread Count:          %15d\n", max_num_threads);
-  fprintf(stdout,"  Shared Memory Locations:   %15d\n", 
-                                    shared_memory->count_addresses());
+  fprintf(stdout,"  Shared Memory Locations:   %15d\n", count_addresses());
   fprintf(stdout,"  Physical Named Barriers;   %15d\n", max_num_barriers);
-  fprintf(stdout,"  Dynamic Barrier Instances: %15d\n", 
-                                    graph->count_total_barriers());
-  fprintf(stdout,"  Static Instructions:       %15d\n", 
-                                    count_instructions());
-  fprintf(stdout,"  Dynamic Instructions:      %15d\n",
-                                    count_dynamic_instructions());
-  fprintf(stdout,"  Weft Statements:           %15d\n",
-                                    count_weft_statements());   
-  fprintf(stdout,"  Total Race Tests:          %15ld\n",
-                                    shared_memory->count_race_tests());
+  fprintf(stdout,"  Dynamic Barrier Instances: %15d\n", count_total_barriers());
+  fprintf(stdout,"  Static Instructions:       %15d\n", count_instructions());
+  fprintf(stdout,"  Dynamic Instructions:      %15d\n", count_dynamic_instructions());
+  fprintf(stdout,"  Weft Statements:           %15d\n", count_weft_statements());   
+  fprintf(stdout,"  Total Race Tests:          %15ld\n",count_race_tests());
 }
 
 void Program::print_files(void)
 {
+  // We'll only dump the first CTA worth of threads for now
+  assert(!cta_states.empty());
+  std::vector<Thread*> &threads = cta_states[0].threads;
   weft->initialize_count(max_num_threads);
   for (std::vector<Thread*>::const_iterator it = threads.begin();
         it != threads.end(); it++)
@@ -505,10 +513,14 @@ void Program::print_files(void)
 int Program::count_dynamic_instructions(void)
 {
   int result = 0;
-  for (std::vector<Thread*>::const_iterator it = threads.begin();
-        it != threads.end(); it++)
+  for (unsigned idx = 0; idx < cta_states.size(); idx++)
   {
-    result += (*it)->count_dynamic_instructions();
+    std::vector<Thread*> &threads = cta_states[idx].threads;
+    for (std::vector<Thread*>::const_iterator it = threads.begin();
+          it != threads.end(); it++)
+    {
+      result += (*it)->count_dynamic_instructions();
+    }
   }
   return result;
 }
@@ -516,10 +528,44 @@ int Program::count_dynamic_instructions(void)
 int Program::count_weft_statements(void)
 {
   int result = 0;
-  for (std::vector<Thread*>::const_iterator it = threads.begin();
-        it != threads.end(); it++)
+  for (unsigned idx = 0; idx < cta_states.size(); idx++)
   {
-    result += (*it)->count_weft_statements();
+    std::vector<Thread*> &threads = cta_states[idx].threads;
+    for (std::vector<Thread*>::const_iterator it = threads.begin();
+          it != threads.end(); it++)
+    {
+      result += (*it)->count_weft_statements();
+    }
+  }
+  return result;
+}
+
+int Program::count_total_barriers(void)
+{
+  int result = 0;
+  for (unsigned idx = 0; idx < cta_states.size(); idx++)
+  {
+    result += cta_states[idx].graph->count_total_barriers();
+  }
+  return result;
+}
+
+int Program::count_addresses(void)
+{
+  int result = 0;
+  for (unsigned idx = 0; idx < cta_states.size(); idx++)
+  {
+    result += cta_states[idx].shared_memory->count_addresses();
+  }
+  return result;
+}
+
+size_t Program::count_race_tests(void)
+{
+  size_t result = 0;
+  for (unsigned idx = 0; idx < cta_states.size(); idx++)
+  {
+    result += cta_states[idx].shared_memory->count_race_tests();
   }
   return result;
 }
@@ -605,11 +651,25 @@ void Program::add_line(const std::string &line, int line_num)
   lines.push_back(std::pair<std::string,int>(line, line_num));
 }
 
-void Program::set_block_dim(int *array)
+void Program::set_block_dim(const int *array)
 {
   for (int i = 0; i < 3; i++)
     block_dim[i] = array[i];
   max_num_threads = block_dim[0] * block_dim[1] * block_dim[2];
+}
+
+void Program::add_block_id(const int *array)
+{
+  cta_states.push_back(CTAState()); 
+  CTAState &last = cta_states.back();
+  for (int i = 0; i < 3; i++)
+    last.block_id[i] = array[i];
+}
+
+void Program::set_grid_dim(const int *array)
+{
+  for (int i = 0; i < 3; i++)
+    grid_dim[i] = array[i];
 }
 
 void Program::fill_block_dim(int *array) const
@@ -628,6 +688,15 @@ void Program::fill_grid_dim(int *array) const
 {
   for (int i = 0; i < 3; i++)
     array[i] = grid_dim[i];
+}
+
+void Program::verify(void)
+{
+  emulate_threads();
+  construct_dependence_graph();
+  compute_happens_relationships();
+  check_for_race_conditions();
+  print_statistics();
 }
 
 void Program::convert_to_instructions(

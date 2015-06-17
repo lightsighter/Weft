@@ -69,11 +69,7 @@ void Weft::verify(void)
         it != programs.end(); it++)
   {
     Program *program = *it;
-    program->emulate_threads();
-    program->construct_dependence_graph();
-    program->compute_happens_relationships();
-    program->check_for_race_conditions();
-    program->print_statistics();
+    program->verify(); 
   }
   if (instrument)
     report_instrumentation();
@@ -258,16 +254,12 @@ void Weft::report_usage(int error, const char *error_str)
   exit(error);
 }
 
-void Weft::initialize_program(int *bdim, int *bid,
-                              int *gdim, bool &synchronous)
+bool Weft::initialize_program(Program *program) const
 {
-  for (int i = 0; i < 3; i++)
-    bdim[i] = block_dim[i];
-  for (int i = 0; i < 3; i++)
-    bid[i] = block_id[i];
-  for (int i = 0; i < 3; i++)
-    gdim[i] = grid_dim[i];
-  synchronous = warp_synchronous;
+  program->set_block_dim(block_dim);
+  program->add_block_id(block_id);
+  program->set_grid_dim(grid_dim);
+  return warp_synchronous;
 }
 
 void Weft::start_parsing_instrumentation(void)

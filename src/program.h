@@ -58,6 +58,17 @@ public:
 
 class Program {
 public:
+  struct CTAState {
+  public:
+    CTAState(void)
+      : shared_memory(NULL), graph(NULL) { }
+  public:
+    int block_id[3];
+    SharedMemory *shared_memory;
+    BarrierDependenceGraph *graph;
+    std::vector<Thread*> threads;
+  };
+public:
   Program(Weft *weft, std::string &kernel_name);
   Program(const Program &rhs);
   ~Program(void);
@@ -74,7 +85,7 @@ public:
   inline int thread_count(void) const { return max_num_threads; }
   inline bool assume_warp_synchronous(void) const { return warp_synchronous; }
   inline const char* get_name(void) const { return kernel_name.c_str(); }
-public:
+protected:
   void emulate_threads(void);
   void construct_dependence_graph(void);
   void compute_happens_relationships(void);
@@ -83,16 +94,22 @@ public:
   void print_files(void);
   int count_dynamic_instructions(void);
   int count_weft_statements(void);
+  int count_total_barriers(void);
+  int count_addresses(void);
+  size_t count_race_tests(void);
 public:
   int emulate(Thread *thread);
   void emulate_warp(Thread **threads);
   void get_kernel_prefix(char *buffer, size_t count);
 public:
   void add_line(const std::string &line, int line_num);
-  void set_block_dim(int *array);
+  void set_block_dim(const int *array);
+  void add_block_id(const int *array);
+  void set_grid_dim(const int *array);
   void fill_block_dim(int *array) const;
   void fill_block_id(int *array) const;
   void fill_grid_dim(int *array) const;
+  void verify(void);
 protected:
   void convert_to_instructions(const std::map<int,const char*> &source_files);
   static bool parse_file_location(const std::string &line,
@@ -110,18 +127,16 @@ protected:
   std::string kernel_name;
   int max_num_threads;
   int max_num_barriers;
-  std::vector<PTXInstruction*> ptx_instructions;
-  std::vector<Thread*> threads;
-  SharedMemory *shared_memory;
 protected:
   int block_dim[3];
   int block_id[3];
   int grid_dim[3];
   bool warp_synchronous;
-protected:
-  BarrierDependenceGraph *graph;
+  unsigned current_cta;
+  std::vector<CTAState> cta_states;
 protected:
   std::vector<std::pair<std::string,int> > lines;
+  std::vector<PTXInstruction*> ptx_instructions;
 protected:
   // Instrumentation
   unsigned long long timing[TOTAL_STAGES];
